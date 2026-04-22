@@ -15,6 +15,7 @@
 #include "app.h"
 #include "app_att.h"
 #include "app_ctrl.h"
+#include "app_uart.h"
 
 #include "app.h"
 
@@ -24,6 +25,156 @@ u8 g_ctrlTxBuf[CTRL_TX_MAX_LEN] = {0};
 
 // simple sequence generator for events/async notifications
 static u8 g_ctrlSeq = 0;
+
+typedef struct
+{
+    u8 powerState;          // 电源状态: 0=关机, 1=开机(由 BLE MCU 本地维护)
+    u8 workState;           // 当前工作状态: 0=OFF, 1=监测, 2=识别, 3=执行, 4=休息
+    u8 btLinked;            // 兼容字段: 对当前连接会话固定返回 1（保留给旧版 APP）
+    u8 ownerVoiceExist;     // 主人录音是否存在: 0=无, 1=有
+    u8 ownerVoiceDuration;  // 主人录音时长(秒)
+    u8 volume;              // 音量值(当前约定 0~30)
+    u8 calmMode;            // 安抚模式: 0=自动调整, 1=人工干预
+    u8 enabledMask;         // 安抚措施使能位: bit0=音乐 bit1=主人录音 bit2=超声
+    u8 usMask;              // 超声子措施使能位: bit0=25kHz bit1=30kHz bit2=25&30kHz
+    u8 measureOrderCount;   // 安抚措施执行顺序项数(最多 3)
+    u8 measureOrder[3];     // 安抚措施执行顺序: 1=音乐 2=主人录音 3=超声
+    u8 usOrderCount;        // 超声执行顺序项数(最多 3)
+    u8 usOrder[3];          // 超声执行顺序: 1=25kHz 2=30kHz 3=25&30kHz
+} app_ctrl_state_t;
+
+static app_ctrl_state_t g_ctrlState = {
+    .powerState         = 1,
+    .workState          = 1,
+    .btLinked           = 1,
+    .ownerVoiceExist    = 0,
+    .ownerVoiceDuration = 0,
+    .volume             = 30,
+    .calmMode           = 0,
+    .enabledMask        = 0x05,
+    .usMask             = 0x07,
+    .measureOrderCount  = 2,
+    .measureOrder       = {1, 3, 0},
+    .usOrderCount       = 3,
+    .usOrder            = {1, 2, 3},
+};
+
+typedef struct
+{
+    u8 bleSeq;
+} app_ctrl_ble_req_ctx_t;
+
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_status_get;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_info_get;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_mode_get;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_volume_set;
+
+static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 8)
+    {
+        // 约定: [status,power,work,bt,ownerRec,volume,calmMode,enabledMask,usMask]
+        // 注意: powerState 由 BLE MCU 本地维护，不使用 SOC 上报值覆盖。
+        if (payload[0] == 0x00)
+        {
+            g_ctrlState.workState       = payload[2];
+            // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
+            g_ctrlState.ownerVoiceExist = payload[4];
+            g_ctrlState.volume          = payload[5];
+            g_ctrlState.calmMode        = payload[6];
+            g_ctrlState.enabledMask     = payload[7];
+            if (payloadLen >= 9)
+            {
+                g_ctrlState.usMask = payload[8];
+            }
+        }
+    }
+
+    u8 rsp[9] = {
+        CTRL_STATUS_OK,
+        g_ctrlState.powerState,
+        g_ctrlState.workState,
+        g_ctrlState.btLinked,
+        g_ctrlState.ownerVoiceExist,
+        g_ctrlState.volume,
+        g_ctrlState.calmMode,
+        g_ctrlState.enabledMask,
+        g_ctrlState.usMask,
+    };
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_STATUS_GET, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_owner_rec_info_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 3 && payload[0] == 0x00)
+    {
+        // 约定: [status,exist,duration]
+        g_ctrlState.ownerVoiceExist    = payload[1];
+        g_ctrlState.ownerVoiceDuration = payload[2];
+    }
+
+    u8 rsp[3] = {CTRL_STATUS_OK, g_ctrlState.ownerVoiceExist, g_ctrlState.ownerVoiceDuration};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_INFO_GET, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_calm_mode_get_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 7 && payload[0] == 0x00)
+    {
+        // 复用 STATUS_GET 回包: [status,power,work,bt,ownerRec,volume,calmMode,enabledMask,usMask]
+        g_ctrlState.calmMode = payload[6];
+    }
+
+    u8 rsp[5] = {CTRL_STATUS_OK, g_ctrlState.calmMode, g_ctrlState.usOrder[0], g_ctrlState.usOrder[1], g_ctrlState.usOrder[2]};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_GET, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_volume_set_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 2 && payload[0] == 0x00)
+    {
+        g_ctrlState.volume = payload[1];
+        u8 rsp[2]          = {CTRL_STATUS_OK, g_ctrlState.volume};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+    else
+    {
+        u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+}
 
 // ----------------------- sending -----------------------
 int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
@@ -134,7 +285,9 @@ static int app_ctrl_handle_time_set(u8 seq, u8 *payload, u16 len)
     (void)epoch_sec;
     (void)tz_q15;
 
-    u8 rsp[2] = {CTRL_STATUS_OK, 0};
+    app_uart_send_cmd(UART_SOC_TIME_SET, payload, len, 0);
+
+    u8 rsp[1] = {CTRL_STATUS_OK};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, seq, rsp, sizeof(rsp));
     return 0;
 }
@@ -150,6 +303,9 @@ static int app_ctrl_handle_power_ctrl(u8 seq, u8 *payload, u16 len)
 
     u8 on = payload[0] ? 1 : 0;
     app_set_power_state(on);
+    g_ctrlState.powerState = on;
+    g_ctrlState.workState  = on ? 1 : 0;
+    app_uart_send_cmd(UART_SOC_POWER_CTRL, &on, 1, 0);
 
     u8 rsp[2] = {CTRL_STATUS_OK, on};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_POWER_CTRL, seq, rsp, sizeof(rsp));
@@ -160,6 +316,19 @@ static int app_ctrl_handle_status_get(u8 seq, u8 *payload, u16 len)
 {
     (void)payload;
     (void)len;
+    g_ctrlState.btLinked    = 1;
+    g_ctx_status_get.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_STATUS_GET,
+            0,
+            0,
+            app_ctrl_rsp_status_get_from_soc,
+            &g_ctx_status_get,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_STATUS_GET, seq, rsp, sizeof(rsp));
+    }
     return 0;
 }
 
@@ -191,12 +360,276 @@ static int app_ctrl_handle_uid_get(u8 seq, u8 *payload, u16 len)
     return 0;
 }
 
+static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
+{
+    if (len < 1 || payload[0] > 30)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    g_ctx_volume_set.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_VOLUME_SET,
+            payload,
+            1,
+            app_ctrl_rsp_volume_set_from_soc,
+            &g_ctx_volume_set,
+            0)
+        != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, seq, rsp, sizeof(rsp));
+    }
+    return 0;
+}
+
+static int app_ctrl_handle_volume_get(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_GET, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_start(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    app_uart_send_cmd(UART_SOC_OWNER_REC_START, 0, 0, 0);
+    u8 rsp[1] = {CTRL_STATUS_OK};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_stop(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    app_uart_send_cmd(UART_SOC_OWNER_REC_STOP, 0, 0, 0);
+    g_ctrlState.ownerVoiceDuration = 5;
+    g_ctrlState.ownerVoiceExist    = (g_ctrlState.ownerVoiceDuration >= 3) ? 1 : 0;
+
+    u8 rsp[2] = {g_ctrlState.ownerVoiceExist ? CTRL_STATUS_OK : CTRL_STATUS_PARAM_ERROR, g_ctrlState.ownerVoiceDuration};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_play(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (!g_ctrlState.ownerVoiceExist)
+    {
+        u8 rsp[2] = {CTRL_STATUS_NO_OWNER_VOICE, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    app_uart_send_cmd(UART_SOC_OWNER_REC_PLAY, 0, 0, 0);
+    u8 rsp[1] = {CTRL_STATUS_OK};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_delete(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    app_uart_send_cmd(UART_SOC_OWNER_REC_DELETE, 0, 0, 0);
+    g_ctrlState.ownerVoiceExist    = 0;
+    g_ctrlState.ownerVoiceDuration = 0;
+    u8 rsp[1]                      = {CTRL_STATUS_OK};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_info_get(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_INFO_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    g_ctx_owner_rec_info_get.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_INFO_GET,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_info_from_soc,
+            &g_ctx_owner_rec_info_get,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_INFO_GET, seq, rsp, sizeof(rsp));
+    }
+    return 0;
+}
+
+static int app_ctrl_handle_calm_mode_set(u8 seq, u8 *payload, u16 len)
+{
+    if (len < 1 || payload[0] > 1)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    g_ctrlState.calmMode = payload[0];
+    app_uart_send_cmd(UART_SOC_CALM_MODE_SET, payload, 1, 0);
+    u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.calmMode};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_SET, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_calm_mode_get(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    g_ctx_calm_mode_get.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_STATUS_GET,
+            0,
+            0,
+            app_ctrl_rsp_calm_mode_get_from_soc,
+            &g_ctx_calm_mode_get,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_GET, seq, rsp, sizeof(rsp));
+    }
+    return 0;
+}
+
+static int app_ctrl_handle_calm_strategy_set(u8 seq, u8 *payload, u16 len)
+{
+    if (len < 4)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    u8 mode        = payload[0];
+    u8 enabledMask = payload[1];
+    u8 measureCnt  = payload[2];
+    if (mode > 1 || enabledMask == 0 || measureCnt > 3)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    u16 idx = 3;
+    if ((u16)(idx + measureCnt + 1) > len)
+    {
+        u8 rsp[2] = {CTRL_STATUS_LEN_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    g_ctrlState.calmMode          = mode;
+    g_ctrlState.enabledMask       = enabledMask;
+    g_ctrlState.measureOrderCount = measureCnt;
+    memset(g_ctrlState.measureOrder, 0, sizeof(g_ctrlState.measureOrder));
+    for (u8 i = 0; i < measureCnt; i++)
+    {
+        g_ctrlState.measureOrder[i] = payload[idx++];
+    }
+
+    u8 usCnt = payload[idx++];
+    if (usCnt > 3 || (u16)(idx + usCnt) > len)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    g_ctrlState.usOrderCount = usCnt;
+    g_ctrlState.usMask       = 0;
+    memset(g_ctrlState.usOrder, 0, sizeof(g_ctrlState.usOrder));
+    for (u8 i = 0; i < usCnt; i++)
+    {
+        u8 item                = payload[idx++];
+        g_ctrlState.usOrder[i] = item;
+        if (item >= 1 && item <= 3)
+        {
+            g_ctrlState.usMask |= (u8)(1 << (item - 1));
+        }
+    }
+
+    app_uart_send_cmd(UART_SOC_CALM_STRATEGY_SET, payload, len, 0);
+    u8 rsp[1] = {CTRL_STATUS_OK};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_calm_strategy_get(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    u8 rsp[16];
+    u8 n     = 0;
+    rsp[n++] = CTRL_STATUS_OK;
+    rsp[n++] = g_ctrlState.calmMode;
+    rsp[n++] = g_ctrlState.enabledMask;
+    rsp[n++] = g_ctrlState.measureOrderCount;
+    for (u8 i = 0; i < g_ctrlState.measureOrderCount; i++)
+    {
+        rsp[n++] = g_ctrlState.measureOrder[i];
+    }
+    rsp[n++] = g_ctrlState.usOrderCount;
+    for (u8 i = 0; i < g_ctrlState.usOrderCount; i++)
+    {
+        rsp[n++] = g_ctrlState.usOrder[i];
+    }
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_GET, seq, rsp, n);
+    return 0;
+}
+
 // ----------------------- public APIs -----------------------
 void app_ctrl_init(void)
 {
     memset(g_ctrlRxBuf, 0, sizeof(g_ctrlRxBuf));
     memset(g_ctrlTxBuf, 0, sizeof(g_ctrlTxBuf));
-    g_ctrlSeq = 0;
+    g_ctrlSeq            = 0;
+    g_ctrlState.btLinked = 1;
 }
 
 void app_ctrl_onRx(u8 *data, u16 len)
@@ -253,6 +686,50 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_UID_GET:
         BLE_LOG_D("CTRL_CMD_UID_GET");
         app_ctrl_handle_uid_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_VOLUME_SET:
+        BLE_LOG_D("CTRL_CMD_VOLUME_SET");
+        app_ctrl_handle_volume_set(seq, payload, payLen);
+        break;
+    case CTRL_CMD_VOLUME_GET:
+        BLE_LOG_D("CTRL_CMD_VOLUME_GET");
+        app_ctrl_handle_volume_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_START:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_START");
+        app_ctrl_handle_owner_rec_start(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_STOP:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_STOP");
+        app_ctrl_handle_owner_rec_stop(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_PLAY:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_PLAY");
+        app_ctrl_handle_owner_rec_play(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_DELETE:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_DELETE");
+        app_ctrl_handle_owner_rec_delete(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_INFO_GET:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_INFO_GET");
+        app_ctrl_handle_owner_rec_info_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_MODE_SET:
+        BLE_LOG_D("CTRL_CMD_CALM_MODE_SET");
+        app_ctrl_handle_calm_mode_set(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_MODE_GET:
+        BLE_LOG_D("CTRL_CMD_CALM_MODE_GET");
+        app_ctrl_handle_calm_mode_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_STRATEGY_SET:
+        BLE_LOG_D("CTRL_CMD_CALM_STRATEGY_SET");
+        app_ctrl_handle_calm_strategy_set(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_STRATEGY_GET:
+        BLE_LOG_D("CTRL_CMD_CALM_STRATEGY_GET");
+        app_ctrl_handle_calm_strategy_get(seq, payload, payLen);
         break;
     default: {
         u8 rsp[2] = {CTRL_STATUS_UNSUPPORTED_CMD, 0};

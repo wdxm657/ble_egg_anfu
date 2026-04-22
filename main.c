@@ -28,6 +28,7 @@
 #include "app.h"
 #include "app_att.h"
 #include "app_buffer.h"
+#include "app_uart.h"
 
 /**
  * @brief   IRQ handler
@@ -36,6 +37,7 @@
  */
 _attribute_ram_code_ void irq_handler(void)
 {
+    app_uart_ndma_irq_proc();
     blc_sdk_irq_handler();
 }
 

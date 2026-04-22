@@ -24,6 +24,8 @@
 #ifndef _APP_H
 #define _APP_H
 
+#include "app_uart.h"
+
 
 /**
  * @brief		user initialization when MCU power on or wake_up from deepSleep mode
@@ -51,14 +53,6 @@ void main_loop (void);
 
 void app_set_power_state(u8 on);
 void app_get_flash_uid(u8 *uid, u8 len);
-
-/**
- * @brief     uart ndma interrupt process
- * @param[in] none.
- * @return    none.
- */
-void app_uart_ndma_irq_proc(void);
-
 
 /**
  * @brief      flash protection operation, including all locking & unlocking for application

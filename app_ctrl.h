@@ -30,6 +30,19 @@ enum{
 enum{
     CTRL_CMD_POWER_CTRL = 0x12,   // power on/off for auto play
     CTRL_CMD_STATUS_GET = 0x13,   // get device status (power/boundary/height)
+    CTRL_CMD_VOLUME_SET = 0x14,
+    CTRL_CMD_VOLUME_GET = 0x15,
+
+    CTRL_CMD_OWNER_REC_START    = 0x20,
+    CTRL_CMD_OWNER_REC_STOP     = 0x21,
+    CTRL_CMD_OWNER_REC_PLAY     = 0x22,
+    CTRL_CMD_OWNER_REC_DELETE   = 0x23,
+    CTRL_CMD_OWNER_REC_INFO_GET = 0x24,
+
+    CTRL_CMD_CALM_MODE_SET     = 0x30,
+    CTRL_CMD_CALM_MODE_GET     = 0x31,
+    CTRL_CMD_CALM_STRATEGY_SET = 0x33,
+    CTRL_CMD_CALM_STRATEGY_GET = 0x35,
 
     CTRL_CMD_TIME_SET        = 0x32,   // set device time (YYYY-MM-DD HH:MM:SS)
     CTRL_CMD_UID_GET         = 0x34,   // get flash UID (16 bytes, split into 2 responses)
@@ -43,7 +56,12 @@ enum{
     CTRL_STATUS_LEN_ERROR       = 0x01,
     CTRL_STATUS_UNSUPPORTED_CMD = 0x02,
     CTRL_STATUS_PARAM_ERROR     = 0x03,
-    CTRL_STATUS_INTERNAL_ERROR  = 0x04,
+    CTRL_STATUS_BUSY            = 0x04,
+    CTRL_STATUS_STATE_CONFLICT  = 0x05,
+    CTRL_STATUS_NO_OWNER_VOICE  = 0x06,
+    CTRL_STATUS_STORAGE_ERROR   = 0x07,
+    CTRL_STATUS_SOC_TIMEOUT     = 0x08,
+    CTRL_STATUS_INTERNAL_ERROR  = 0x09,
 };
 
 // ATT value max length for RX/TX.
