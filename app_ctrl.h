@@ -42,13 +42,17 @@ enum{
 
     CTRL_CMD_CALM_MODE_SET     = 0x30,
     CTRL_CMD_CALM_MODE_GET     = 0x31,
-    CTRL_CMD_CALM_STRATEGY_SET = 0x33,
-    CTRL_CMD_CALM_STRATEGY_GET = 0x35,
+    CTRL_CMD_CALM_RECORD_GET   = 0x33,
+    CTRL_CMD_CALM_STRATEGY_SET = 0x37,
+    CTRL_CMD_CALM_STRATEGY_GET = 0x38,
 
     CTRL_CMD_TIME_SET        = 0x32,   // set device time (YYYY-MM-DD HH:MM:SS)
     CTRL_CMD_UID_GET         = 0x34,   // get flash UID (16 bytes, split into 2 responses)
 
 	CTRL_CMD_TEXT_CHUNK = 0x40,   // long text transfer in chunks
+
+    // Factory reset: clear owner voice, comfort config, comfort records
+    CTRL_CMD_FACTORY_RESET = 0x50,
 };
 
 // Error codes for response payload[0]

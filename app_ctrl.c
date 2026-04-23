@@ -83,10 +83,23 @@ _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_stop;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_play;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_delete;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_play_stop;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_factory_reset;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_time_set;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_mode_set;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_strategy_set;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_strategy_get;
+
+typedef struct
+{
+    u8 bleSeq;
+    u8 maxCount;
+    u8 totalSend;
+    u8 total;
+    u8 sent;
+    u8 busy;
+} app_ctrl_record_req_ctx_t;
+
+_attribute_data_retention_ static app_ctrl_record_req_ctx_t g_ctx_calm_record_get;
 
 static void app_ctrl_time_cache_update(void)
 {
@@ -314,9 +327,46 @@ static void app_ctrl_rsp_owner_rec_play_stop_from_soc(u8 cmdId, u8 seq, const u8
         return;
     }
 
-    u8 err = (payloadLen >= 1) ? payload[0] : 0;
+    u8 err    = (payloadLen >= 1) ? payload[0] : 0;
     u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x00)
+    {
+        // Reset MCU cached state to factory defaults (keep powerState).
+        g_ctrlState.ownerVoiceExist    = 0;
+        g_ctrlState.ownerVoiceDuration = 0;
+        g_ctrlState.calmMode           = 0;
+        g_ctrlState.enabledMask        = 0x05;
+        g_ctrlState.usMask             = 0x07;
+        g_ctrlState.measureOrderCount  = 2;
+        g_ctrlState.measureOrder[0]    = 1;
+        g_ctrlState.measureOrder[1]    = 3;
+        g_ctrlState.measureOrder[2]    = 0;
+        g_ctrlState.usOrderCount       = 3;
+        g_ctrlState.usOrder[0]         = 1;
+        g_ctrlState.usOrder[1]         = 2;
+        g_ctrlState.usOrder[2]         = 3;
+
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    u8 err = (payloadLen >= 1) ? payload[0] : 0;
+    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
@@ -482,6 +532,81 @@ static void app_ctrl_rsp_calm_strategy_get_from_soc(u8 cmdId, u8 seq, const u8 *
         rsp[n++] = g_ctrlState.usOrder[i];
     }
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_GET, ctx->bleSeq, rsp, n);
+}
+
+static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_record_req_ctx_t *ctx = (app_ctrl_record_req_ctx_t *)userData;
+    if (!ctx || !ctx->busy)
+    {
+        return;
+    }
+
+    if (payloadLen < 4 || payload[0] != 0x00)
+    {
+        u8 rsp[3] = {CTRL_STATUS_INTERNAL_ERROR, 0, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        ctx->busy = 0;
+        return;
+    }
+
+    u8 total      = payload[1];
+    u8 nextOffset = payload[2];
+    u8 chunkCount = payload[3];
+    if ((u16)(4 + chunkCount * 8) > payloadLen)
+    {
+        u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        ctx->busy = 0;
+        return;
+    }
+
+    if (ctx->total == 0)
+    {
+        ctx->total     = total;
+        ctx->totalSend = (ctx->maxCount < total) ? ctx->maxCount : total;
+    }
+
+    for (u8 i = 0; i < chunkCount; i++)
+    {
+        if (ctx->sent >= ctx->totalSend)
+        {
+            break;
+        }
+        u16 p = (u16)(4 + i * 8);
+        u8  rsp[12];
+        rsp[0] = CTRL_STATUS_OK;
+        rsp[1] = ctx->totalSend;
+        rsp[2] = ctx->sent;
+        memcpy(&rsp[3], &payload[p], 8);  // start/end
+        rsp[11] = 0;                      // tz (legacy format)
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        ctx->sent++;
+        // Space NOTIFYs to avoid drops on the link layer.
+        sleep_us(8000);
+    }
+
+    if (ctx->sent >= ctx->totalSend || nextOffset == 0xFF)
+    {
+        ctx->busy = 0;
+        return;
+    }
+
+    u8 req[1] = {nextOffset};
+    if (app_uart_send_cmd_with_cb(UART_SOC_CALM_RECORD_GET,
+                                  req,
+                                  sizeof(req),
+                                  app_ctrl_rsp_calm_record_get_from_soc,
+                                  ctx,
+                                  0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        ctx->busy = 0;
+        return;
+    }
 }
 
 static void app_ctrl_rsp_owner_rec_delete_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
@@ -1040,6 +1165,67 @@ static int app_ctrl_handle_calm_strategy_get(u8 seq, u8 *payload, u16 len)
     return 0;
 }
 
+static int app_ctrl_handle_calm_record_get(u8 seq, u8 *payload, u16 len)
+{
+    if (len != 1 || payload[0] == 0 || payload[0] > 16)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (g_ctx_calm_record_get.busy)
+    {
+        u8 rsp[2] = {CTRL_STATUS_BUSY, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, seq, rsp, sizeof(rsp));
+        return -2;
+    }
+
+    memset(&g_ctx_calm_record_get, 0, sizeof(g_ctx_calm_record_get));
+    g_ctx_calm_record_get.bleSeq   = seq;
+    g_ctx_calm_record_get.maxCount = payload[0];
+    g_ctx_calm_record_get.busy     = 1;
+
+    u8 req[1] = {0};
+    if (app_uart_send_cmd_with_cb(UART_SOC_CALM_RECORD_GET,
+                                  req,
+                                  sizeof(req),
+                                  app_ctrl_rsp_calm_record_get_from_soc,
+                                  &g_ctx_calm_record_get,
+                                  0) != 0)
+    {
+        g_ctx_calm_record_get.busy = 0;
+        u8 rsp[2]                  = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, seq, rsp, sizeof(rsp));
+        return -3;
+    }
+    return 0;
+}
+
+static int app_ctrl_handle_factory_reset(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 1)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    g_ctx_factory_reset.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(UART_SOC_FACTORY_RESET,
+                                  payload,
+                                  1,
+                                  app_ctrl_rsp_factory_reset_from_soc,
+                                  &g_ctx_factory_reset,
+                                  0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, seq, rsp, sizeof(rsp));
+        return -2;
+    }
+    return 0;
+}
+
 // ----------------------- public APIs -----------------------
 void app_ctrl_init(void)
 {
@@ -1158,6 +1344,14 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_CALM_STRATEGY_GET:
         BLE_LOG_D("CTRL_CMD_CALM_STRATEGY_GET");
         app_ctrl_handle_calm_strategy_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_RECORD_GET:
+        BLE_LOG_D("CTRL_CMD_CALM_RECORD_GET");
+        app_ctrl_handle_calm_record_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_FACTORY_RESET:
+        BLE_LOG_D("CTRL_CMD_FACTORY_RESET");
+        app_ctrl_handle_factory_reset(seq, payload, payLen);
         break;
     default: {
         u8 rsp[2] = {CTRL_STATUS_UNSUPPORTED_CMD, 0};

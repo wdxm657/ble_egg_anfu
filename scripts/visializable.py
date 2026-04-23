@@ -30,9 +30,11 @@ CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25
 CTRL_CMD_CALM_MODE_SET = 0x30
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
-CTRL_CMD_CALM_STRATEGY_SET = 0x33
+CTRL_CMD_CALM_RECORD_GET = 0x33
 CTRL_CMD_UID_GET = 0x34
-CTRL_CMD_CALM_STRATEGY_GET = 0x35
+CTRL_CMD_CALM_STRATEGY_SET = 0x37
+CTRL_CMD_CALM_STRATEGY_GET = 0x38
+CTRL_CMD_FACTORY_RESET = 0x50
 CTRL_CMD_TEXT_CHUNK = 0x40
 
 CMD_NAME = {
@@ -49,10 +51,12 @@ CMD_NAME = {
     CTRL_CMD_OWNER_REC_PLAY_STOP: "OWNER_REC_PLAY_STOP",
     CTRL_CMD_CALM_MODE_SET: "CALM_MODE_SET",
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
+    CTRL_CMD_CALM_RECORD_GET: "CALM_RECORD_GET",
     CTRL_CMD_TIME_SET: "TIME_SET",
     CTRL_CMD_CALM_STRATEGY_SET: "CALM_STRATEGY_SET",
     CTRL_CMD_UID_GET: "UID_GET",
     CTRL_CMD_CALM_STRATEGY_GET: "CALM_STRATEGY_GET",
+    CTRL_CMD_FACTORY_RESET: "FACTORY_RESET",
     CTRL_CMD_TEXT_CHUNK: "TEXT_CHUNK",
 }
 
@@ -257,6 +261,19 @@ class BleController:
                     f"usOrder={us_order}({us_names})"
                 )
             return f"{base} payload={p.hex()}"
+        if frame.cmd_id == CTRL_CMD_CALM_RECORD_GET:
+            p = frame.payload
+            if len(p) >= 12 and p[0] == 0x00:
+                count = p[1]
+                idx = p[2]
+                start_ts = int.from_bytes(p[3:7], "little", signed=False)
+                end_ts = int.from_bytes(p[7:11], "little", signed=False)
+                tz = int.from_bytes(p[11:12], "little", signed=True)
+                end_txt = "RUNNING" if end_ts == 0xFFFFFFFF else str(end_ts)
+                return (
+                    f"{base} count={count} index={idx} start={start_ts} end={end_txt} tz_q15={tz}"
+                )
+            return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_UID_GET and len(frame.payload) >= 2:
             return f"{base} payload={frame.payload.hex()}"
         return f"{base} payload={frame.payload.hex()}"
@@ -402,6 +419,7 @@ class MainWindow(QtWidgets.QWidget):
                 "解绑(恢复出厂)",
                 lambda: self._send(CTRL_CMD_UNPAIR_REQ, b"", "UNPAIR_REQ"),
             ),
+            ("恢复出厂(仅清数据)", lambda: self._send(CTRL_CMD_FACTORY_RESET, bytes([1]), "FACTORY_RESET reason=1")),
             ("时间同步(当前)", self._send_time_now),
             ("UID 查询", lambda: self._send(CTRL_CMD_UID_GET, b"", "UID_GET")),
         ]
@@ -448,8 +466,13 @@ class MainWindow(QtWidgets.QWidget):
         b3.addWidget(self.cmb_mode, 0, 1)
         b3.addWidget(btn_mode_set, 1, 0)
         b3.addWidget(btn_mode_get, 1, 1)
+        btn_record_get = QtWidgets.QPushButton("安抚记录查询")
+        btn_record_get.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_RECORD_GET, bytes([16]), "CALM_RECORD_GET maxCount=16")
+        )
+        b3.addWidget(btn_record_get, 2, 0, 1, 2)
         self.lbl_mode_query = QtWidgets.QLabel("模式查询结果：-")
-        b3.addWidget(self.lbl_mode_query, 2, 0, 1, 2)
+        b3.addWidget(self.lbl_mode_query, 3, 0, 1, 2)
         grid.addWidget(box_mode, 1, 0)
 
         # 安抚策略

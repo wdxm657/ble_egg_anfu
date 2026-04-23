@@ -1,12 +1,13 @@
 # 蛋安抚器 BLE + MCU<->SOC 串口接口设计（V1）
 
+### 设备名 SincereEGGA
+
 ## 1. 目标与范围
 
 - 目标：先完成协议与接口层设计，支持 APP、BLE MCU、SOC 并行开发。
 - 范围：
   - APP <-> BLE MCU：BLE GATT 协议（控制、查询、上报、日志拉取）。
   - BLE MCU <-> SOC：UART 私有二进制协议（执行控制、状态回传、事件上报）。
-- 不含：SOC 业务算法具体实现（后续补）。
 
 ---
 
@@ -22,7 +23,7 @@
    - 超声组合与顺序配置（手动模式可排序）
 6. 自动安抚流程执行与过程上报（检测 -> 判断 -> 多步骤执行 -> 成功/失败）。
 7. 安抚日志上报与拉取（近16次）。
-8. 解除配对后的工厂重置（清录音、清历史偏好、断连）。
+8. 恢复出厂重置（清录音、清历史偏好、清安抚记录）。
 
 ---
 
@@ -208,16 +209,24 @@ Byte6.. payload
 - 示例请求帧（hex）：`01 01 24 01 00 00`
 - 示例响应帧（hex）：`01 02 24 01 03 00 00 01 08`
 
-12) `0x30 CALM_MODE_SET`  
+13) `0x33 CALM_RECORD_GET`  
+- 功能：读取安抚记录（最多16条）。每条记录为开始/结束时间戳。  
+- 请求：`[maxCount]`（1~16）
+- 响应（可多包 RSP）：`[status, count, index, startTs(u32), endTs(u32), tzQ15(s8)]`
+  - `count`：本次查询返回的总条数（不超过 `maxCount`）。
+  - `index`：当前这包记录在本次查询结果中的序号（0-based）。
+  - `endTs=0xFFFFFFFF` 表示该条记录正在运行（尚未结束）。
+
+14) `0x30 CALM_MODE_SET`  
 - 请求：`[mode]`  
 - 响应：`[status, modeApplied]`
 
-13) `0x31 CALM_MODE_GET`  
+15) `0x31 CALM_MODE_GET`  
 - 请求：空  
 - 响应：`[status, mode, effectiveUsOrder(3B)]`  
 - 自动模式下返回设备当前“有效超声顺序”。
 
-14) `0x33 CALM_STRATEGY_SET`  
+16) `0x37 CALM_STRATEGY_SET`  
 - 请求：  
   `[mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
   - `enabledMask` bit0 音乐，bit1 主人录音，bit2 超声
@@ -226,7 +235,7 @@ Byte6.. payload
 - 响应：`[status]`
 - 规则校验：至少一个措施；手动模式按请求顺序执行；自动模式超声顺序可动态调整。
 
-15) `0x35 CALM_STRATEGY_GET`  
+17) `0x38 CALM_STRATEGY_GET`  
 - 请求：空  
 - 响应：  
   `[status, mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
@@ -247,11 +256,20 @@ Byte6.. payload
   - `uCnt=payload[idx++]`
   - `usOrder=payload[idx:idx+uCnt]`
 
-17) `0x32 TIME_SET`  
+18) `0x32 TIME_SET`  
 - 请求：`[epochSec(u32), tzQ15(s8)]`  
 - 响应：`[status]`
 
-18) `0x34 UID_GET`  
+19) `0x34 UID_GET`  
+
+20) `0x50 FACTORY_RESET`  
+- 功能：恢复出厂（清主人录音、清安抚记录、清安抚配置并恢复默认）。  
+- 请求：`[reason]`（1=解绑触发；其它值预留）
+- 响应：`[status]`
+- 行为约定：
+  - SOC 删除 `/userdata/owner.pcm`；
+  - 清空 `comfortRecordList`；
+  - 删除 `comfortList` 字段使其回落到“出厂默认顺序”（由 SOC 侧默认顺序逻辑兜底）。
 
 ## 3.6 EVENT 接口清单（设备 -> APP）
 
@@ -357,19 +375,31 @@ ByteN+1 crcH
 - `payload=[]`
 - 响应：`[status, mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
 
-12) `0x32 SOC_TIME_SET`  
+12) `0x41 SOC_CALM_RECORD_GET`  
+- `payload=[offset]`（从第几条记录开始拉取，首次传0）
+- 响应：`[status, totalCount, nextOffset, chunkCount, records...]`
+  - 每条 `record` 为 `[startTs(u32), endTs(u32)]`
+  - `nextOffset=0xFF` 表示本次已到末尾。
+  - SOC 在返回末尾分片后会清空“已结束记录”，保留 `endTs=0xFFFFFFFF` 的未结束记录。
+
+13) `0x32 SOC_TIME_SET`  
 - `payload=[epochSec(u32), tzQ15(s8)]`
 - 处理约定：
   - SOC 使用 `clock_settime/settimeofday` 落系统时间（`epochSec`）。
   - SOC 使用 `setenv("TZ", ...)+tzset()` 落系统时区（`tzQ15`，15 分钟单位）。
 
-13) `0x40 SOC_LOG_PULL`  
+14) `0x40 SOC_LOG_PULL`  
 - `payload=[days, pageIdx, pageSize]`
 
-14) `0x50 SOC_FACTORY_RESET`  
+15) `0x50 SOC_FACTORY_RESET`  
 - `payload=[reason]`（1=解绑触发）
+- 行为约定：
+  - 清主人录音文件；
+  - 清安抚记录；
+  - 清安抚配置并恢复出厂默认；
+  - 结束后回 `status`。
 
-15) `0x60 SOC_BT_LINK_STATE_NOTIFY`  
+16) `0x60 SOC_BT_LINK_STATE_NOTIFY`  
 - `payload=[linked]`（给 SOC 感知 App 在线状态，可选）
 
 ## 4.4 UART SOC -> MCU 事件清单（必须支持）
