@@ -61,6 +61,16 @@ static app_ctrl_state_t g_ctrlState = {
 
 typedef struct
 {
+    u8  valid;
+    u32 epochSec;
+    s8  tzQ15;
+    u32 lastTick;
+} app_ctrl_time_cache_t;
+
+static app_ctrl_time_cache_t g_timeCache = {0};
+
+typedef struct
+{
     u8 bleSeq;
 } app_ctrl_ble_req_ctx_t;
 
@@ -68,6 +78,25 @@ _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_status_get;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_info_get;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_mode_get;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_volume_set;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_start;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_stop;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_play;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_delete;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_time_set;
+
+static void app_ctrl_time_cache_update(void)
+{
+    if (!g_timeCache.valid)
+    {
+        return;
+    }
+
+    if (clock_time() - g_timeCache.lastTick >= (1000000 * 16))
+    {
+        g_timeCache.epochSec++;
+        g_timeCache.lastTick = clock_time();
+    }
+}
 
 static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
@@ -85,7 +114,7 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         // 注意: powerState 由 BLE MCU 本地维护，不使用 SOC 上报值覆盖。
         if (payload[0] == 0x00)
         {
-            g_ctrlState.workState       = payload[2];
+            g_ctrlState.workState = payload[2];
             // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
             g_ctrlState.ownerVoiceExist = payload[4];
             g_ctrlState.volume          = payload[5];
@@ -174,6 +203,188 @@ static void app_ctrl_rsp_volume_set_from_soc(u8 cmdId, u8 seq, const u8 *payload
         u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, ctx->bleSeq, rsp, sizeof(rsp));
     }
+}
+
+static void app_ctrl_rsp_owner_rec_start_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x00)
+    {
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+    else
+    {
+        u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, payload[0]};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+}
+
+static void app_ctrl_rsp_owner_rec_stop_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 2)
+    {
+        u8 status      = payload[0];
+        u8 durationSec = payload[1];
+        if (status == 0x00)
+        {
+            g_ctrlState.ownerVoiceDuration = durationSec;
+            g_ctrlState.ownerVoiceExist    = (durationSec >= 3) ? 1 : 0;
+            u8 rsp[2]                      = {CTRL_STATUS_OK, durationSec};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+        if (status == 0x01)
+        {
+            g_ctrlState.ownerVoiceDuration = 0;
+            g_ctrlState.ownerVoiceExist    = 0;
+            u8 rsp[2]                      = {CTRL_STATUS_PARAM_ERROR, durationSec};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+    }
+
+    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_owner_rec_play_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1)
+    {
+        if (payload[0] == 0x00)
+        {
+            u8 rsp[1] = {CTRL_STATUS_OK};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+        if (payload[0] == 0x05)
+        {
+            u8 rsp[2] = {CTRL_STATUS_NO_OWNER_VOICE, 0};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+    }
+
+    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    // EVT payload: [eventType, bleStatus, durationSec]
+    // eventType 0x01 = auto-stop by SOC timeout(10s).
+    if (payloadLen < 3 || payload[0] != 0x01)
+    {
+        return;
+    }
+
+    u8 bleStatus   = payload[1];
+    u8 durationSec = payload[2];
+    if (bleStatus == CTRL_STATUS_OK)
+    {
+        g_ctrlState.ownerVoiceDuration = durationSec;
+        g_ctrlState.ownerVoiceExist    = (durationSec >= 3) ? 1 : 0;
+    }
+    else
+    {
+        g_ctrlState.ownerVoiceDuration = 0;
+        g_ctrlState.ownerVoiceExist    = 0;
+    }
+
+    // Forward to APP as BLE EVENT to indicate recording auto-stop.
+    u8 evt_payload[3] = {bleStatus, durationSec, 1};  // 1=auto-stop
+    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_OWNER_REC_STOP, g_ctrlSeq++, evt_payload, sizeof(evt_payload));
+}
+
+static void app_ctrl_rsp_time_set_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x00)
+    {
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x01)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, payload[0]};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    u8 err    = (payloadLen >= 1) ? payload[0] : 0;
+    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static void app_ctrl_rsp_owner_rec_delete_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1)
+    {
+        if (payload[0] == 0x00)
+        {
+            g_ctrlState.ownerVoiceExist    = 0;
+            g_ctrlState.ownerVoiceDuration = 0;
+            u8 rsp[1]                      = {CTRL_STATUS_OK};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+        if (payload[0] == 0x05)
+        {
+            g_ctrlState.ownerVoiceExist    = 0;
+            g_ctrlState.ownerVoiceDuration = 0;
+            u8 rsp[2]                      = {CTRL_STATUS_NO_OWNER_VOICE, 0};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
+            return;
+        }
+    }
+
+    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
 // ----------------------- sending -----------------------
@@ -282,13 +493,24 @@ static int app_ctrl_handle_time_set(u8 seq, u8 *payload, u16 len)
     u32 epoch_sec = ((u32)payload[0]) | ((u32)payload[1] << 8) | ((u32)payload[2] << 16) | ((u32)payload[3] << 24);
     s8  tz_q15    = (s8)payload[4];
 
-    (void)epoch_sec;
-    (void)tz_q15;
+    g_timeCache.valid    = 1;
+    g_timeCache.epochSec = epoch_sec;
+    g_timeCache.tzQ15    = tz_q15;
+    g_timeCache.lastTick = clock_time();
 
-    app_uart_send_cmd(UART_SOC_TIME_SET, payload, len, 0);
+    g_ctx_time_set.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(UART_SOC_TIME_SET,
+                                  payload,
+                                  len,
+                                  app_ctrl_rsp_time_set_from_soc,
+                                  &g_ctx_time_set,
+                                  0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, seq, rsp, sizeof(rsp));
+        return -2;
+    }
 
-    u8 rsp[1] = {CTRL_STATUS_OK};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_TIME_SET, seq, rsp, sizeof(rsp));
     return 0;
 }
 
@@ -376,8 +598,7 @@ static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
             1,
             app_ctrl_rsp_volume_set_from_soc,
             &g_ctx_volume_set,
-            0)
-        != 0)
+            0) != 0)
     {
         u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, seq, rsp, sizeof(rsp));
@@ -408,9 +629,18 @@ static int app_ctrl_handle_owner_rec_start(u8 seq, u8 *payload, u16 len)
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, seq, rsp, sizeof(rsp));
         return -1;
     }
-    app_uart_send_cmd(UART_SOC_OWNER_REC_START, 0, 0, 0);
-    u8 rsp[1] = {CTRL_STATUS_OK};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, seq, rsp, sizeof(rsp));
+    g_ctx_owner_rec_start.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_START,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_start_from_soc,
+            &g_ctx_owner_rec_start,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_START, seq, rsp, sizeof(rsp));
+    }
     return 0;
 }
 
@@ -423,12 +653,18 @@ static int app_ctrl_handle_owner_rec_stop(u8 seq, u8 *payload, u16 len)
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, seq, rsp, sizeof(rsp));
         return -1;
     }
-    app_uart_send_cmd(UART_SOC_OWNER_REC_STOP, 0, 0, 0);
-    g_ctrlState.ownerVoiceDuration = 5;
-    g_ctrlState.ownerVoiceExist    = (g_ctrlState.ownerVoiceDuration >= 3) ? 1 : 0;
-
-    u8 rsp[2] = {g_ctrlState.ownerVoiceExist ? CTRL_STATUS_OK : CTRL_STATUS_PARAM_ERROR, g_ctrlState.ownerVoiceDuration};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, seq, rsp, sizeof(rsp));
+    g_ctx_owner_rec_stop.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_STOP,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_stop_from_soc,
+            &g_ctx_owner_rec_stop,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, seq, rsp, sizeof(rsp));
+    }
     return 0;
 }
 
@@ -441,15 +677,18 @@ static int app_ctrl_handle_owner_rec_play(u8 seq, u8 *payload, u16 len)
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
         return -1;
     }
-    if (!g_ctrlState.ownerVoiceExist)
+    g_ctx_owner_rec_play.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_PLAY,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_play_from_soc,
+            &g_ctx_owner_rec_play,
+            0) != 0)
     {
-        u8 rsp[2] = {CTRL_STATUS_NO_OWNER_VOICE, 0};
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
-        return -1;
     }
-    app_uart_send_cmd(UART_SOC_OWNER_REC_PLAY, 0, 0, 0);
-    u8 rsp[1] = {CTRL_STATUS_OK};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
     return 0;
 }
 
@@ -462,11 +701,18 @@ static int app_ctrl_handle_owner_rec_delete(u8 seq, u8 *payload, u16 len)
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, seq, rsp, sizeof(rsp));
         return -1;
     }
-    app_uart_send_cmd(UART_SOC_OWNER_REC_DELETE, 0, 0, 0);
-    g_ctrlState.ownerVoiceExist    = 0;
-    g_ctrlState.ownerVoiceDuration = 0;
-    u8 rsp[1]                      = {CTRL_STATUS_OK};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, seq, rsp, sizeof(rsp));
+    g_ctx_owner_rec_delete.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_DELETE,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_delete_from_soc,
+            &g_ctx_owner_rec_delete,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, seq, rsp, sizeof(rsp));
+    }
     return 0;
 }
 
@@ -630,6 +876,13 @@ void app_ctrl_init(void)
     memset(g_ctrlTxBuf, 0, sizeof(g_ctrlTxBuf));
     g_ctrlSeq            = 0;
     g_ctrlState.btLinked = 1;
+    g_timeCache.valid    = 0;
+    app_uart_register_evt_handler(UART_SOC_OWNER_REC_EVT, app_ctrl_evt_owner_rec_from_soc, 0);
+}
+
+void app_ctrl_time_task(void)
+{
+    app_ctrl_time_cache_update();
 }
 
 void app_ctrl_onRx(u8 *data, u16 len)

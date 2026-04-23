@@ -121,6 +121,7 @@ int app_uart_send_cmd_with_cb(
         if (slot < 0)
         {
             return -2;
+            BLE_LOG_D("app_uart_send_cmd_with_cb slot < 0");
         }
         g_uart_pending[slot].inUse    = 1;
         g_uart_pending[slot].cmdId    = cmdId;
@@ -142,6 +143,7 @@ int app_uart_send_cmd_with_cb(
                 }
             }
         }
+        BLE_LOG_D("app_uart_send_cmd_with_cb send_frame failed");
         return -1;
     }
     return 0;
@@ -169,7 +171,7 @@ static void app_uart_dispatch_rsp(u8 cmdId, u8 seq, const u8 *payload, u16 paylo
             return;
         }
     }
-    BLE_LOG_D("[SOC_RSP] unmatched cmd=0x%02X seq=%d len=%d", cmdId, seq, payloadLen);
+    BLE_LOG_D("[SOC_RSP] unmatched cmd=0x%02x seq=%d len=%d", cmdId, seq, payloadLen);
 }
 
 static void app_uart_dispatch_evt(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen)
@@ -181,7 +183,7 @@ static void app_uart_dispatch_evt(u8 cmdId, u8 seq, const u8 *payload, u16 paylo
     }
     else
     {
-        BLE_LOG_D("[SOC_EVT] unhandled cmd=0x%02X seq=%d len=%d", cmdId, seq, payloadLen);
+        BLE_LOG_D("[SOC_EVT] unhandled cmd=0x%02x seq=%d len=%d", cmdId, seq, payloadLen);
     }
 }
 
@@ -237,7 +239,7 @@ static void app_uart_try_parse_one(void)
         u8        cmdId   = g_uart_soc_rx_buf[4];
         u8        seq     = g_uart_soc_rx_buf[5];
         const u8 *payload = &g_uart_soc_rx_buf[8];
-        BLE_LOG_D("[SOC_FRAME] t=0x%02X cmd=0x%02X seq=%d len=%d", msgType, cmdId, seq, payloadLen);
+        BLE_LOG_D("[SOC_FRAME] t=0x%02x cmd=0x%02x seq=%d len=%d", msgType, cmdId, seq, payloadLen);
 
         if (msgType == UART_MSG_RSP)
         {
@@ -250,7 +252,7 @@ static void app_uart_try_parse_one(void)
     }
     else
     {
-        BLE_LOG_D("[SOC_FRAME] crc_err recv=0x%04X calc=0x%04X", recvCrc, calcCrc);
+        BLE_LOG_D("[SOC_FRAME] crc_err recv=0x%04x calc=0x%04x", recvCrc, calcCrc);
     }
 
     if (g_uart_soc_rx_len > frameLen)

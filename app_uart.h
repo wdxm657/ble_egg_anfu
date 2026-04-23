@@ -27,6 +27,7 @@ enum{
     UART_SOC_LOG_PULL           = 0x40,
     UART_SOC_FACTORY_RESET      = 0x50,
     UART_SOC_BT_LINK_NOTIFY     = 0x60,
+    UART_SOC_OWNER_REC_EVT      = 0x84,
 };
 
 /**

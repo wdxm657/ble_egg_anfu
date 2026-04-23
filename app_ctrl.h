@@ -82,6 +82,11 @@ extern u8 g_ctrlTxBuf[CTRL_TX_MAX_LEN];
 void app_ctrl_init(void);
 
 /**
+ * @brief   Time cache tick task (1s update).
+ */
+void app_ctrl_time_task(void);
+
+/**
  * @brief   Poll motor direction control limit and notify APP when reached
  */
 void app_ctrl_motor_dir_task(void);

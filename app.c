@@ -29,6 +29,7 @@
 #include "app_ui.h"
 #include "app_buffer.h"
 #include "app_uart.h"
+#include "app_ctrl.h"
 
 #define ADV_IDLE_ENTER_DEEP_TIME  60  // 60 s
 #define CONN_IDLE_ENTER_DEEP_TIME 60  // 60 s
@@ -574,6 +575,7 @@ _attribute_no_inline_ void user_init_normal(void)
 {
     //////////////////////////// personal hardware Initialization  Begin //////////////////////////////////
     app_uart_init();
+    app_ctrl_init();
 
     //////////////////////////// peripheral hardware Initialization  End //////////////////////////////////
     //////////////////////////// basic hardware Initialization  Begin //////////////////////////////////
@@ -921,6 +923,7 @@ void main_loop(void)
 #endif
 
     app_uart_task();
+    app_ctrl_time_task();
 
 ////////////////////////////////////// UI entry /////////////////////////////////
 ///////////////////////////////////// Battery Check ////////////////////////////////

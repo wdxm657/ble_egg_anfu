@@ -54,8 +54,46 @@ CMD_NAME = {
     CTRL_CMD_TEXT_CHUNK: "TEXT_CHUNK",
 }
 
-CTRL_RX_RAW_BYTES = bytes([0x01, 0xA0, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00])
-CTRL_TX_RAW_BYTES = bytes([0x02, 0xA0, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00])
+CTRL_RX_RAW_BYTES = bytes(
+    [
+        0x01,
+        0xA0,
+        0x0D,
+        0x0C,
+        0x0B,
+        0x0A,
+        0x09,
+        0x08,
+        0x07,
+        0x06,
+        0x05,
+        0x04,
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+    ]
+)
+CTRL_TX_RAW_BYTES = bytes(
+    [
+        0x02,
+        0xA0,
+        0x0D,
+        0x0C,
+        0x0B,
+        0x0A,
+        0x09,
+        0x08,
+        0x07,
+        0x06,
+        0x05,
+        0x04,
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+    ]
+)
 
 
 @dataclass
@@ -79,7 +117,19 @@ def parse_ctrl_frame(data: bytes) -> Optional[CtrlFrame]:
 
 def build_ctrl_cmd_frame(cmd_id: int, seq: int, payload: bytes) -> bytes:
     plen = len(payload)
-    return bytes([CTRL_PROTO_VERSION, CTRL_MSG_TYPE_CMD, cmd_id & 0xFF, seq & 0xFF, plen & 0xFF, (plen >> 8) & 0xFF]) + payload
+    return (
+        bytes(
+            [
+                CTRL_PROTO_VERSION,
+                CTRL_MSG_TYPE_CMD,
+                cmd_id & 0xFF,
+                seq & 0xFF,
+                plen & 0xFF,
+                (plen >> 8) & 0xFF,
+            ]
+        )
+        + payload
+    )
 
 
 def _uuid_candidates(raw: bytes) -> Set[int]:
@@ -174,7 +224,10 @@ class BleController:
         if not frame:
             self._log(f"[BLE][RAW] {raw.hex()}")
             return
-        if frame.msg_type == CTRL_MSG_TYPE_EVENT and frame.cmd_id == CTRL_CMD_TEXT_CHUNK:
+        if (
+            frame.msg_type == CTRL_MSG_TYPE_EVENT
+            and frame.cmd_id == CTRL_CMD_TEXT_CHUNK
+        ):
             payload = frame.payload
             if len(payload) < 4:
                 self._log(f"[EVENT][TEXT_CHUNK][SHORT] {payload.hex()}")
@@ -200,7 +253,9 @@ class BleController:
         if frame.msg_type == CTRL_MSG_TYPE_RSP:
             self._log(self._decode_rsp(frame))
             return
-        self._log(f"[EVENT] cmd={CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))} payload={frame.payload.hex()}")
+        self._log(
+            f"[EVENT] cmd={CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))} payload={frame.payload.hex()}"
+        )
 
     async def _worker(self) -> None:
         while not self.stop_event.is_set():
@@ -238,7 +293,9 @@ class BleController:
                             self.seq = (self.seq + 1) & 0xFF
                             frame = build_ctrl_cmd_frame(cmd_id, seq, payload)
                             await client.write_gatt_char(rx_char, frame, response=False)
-                            self._log(f"[SEND] {desc} cmd={CMD_NAME.get(cmd_id, hex(cmd_id))} seq={seq} payload={payload.hex()}")
+                            self._log(
+                                f"[SEND] {desc} cmd={CMD_NAME.get(cmd_id, hex(cmd_id))} seq={seq} payload={payload.hex()}"
+                            )
                         except queue.Empty:
                             pass
                         await asyncio.sleep(0.05)
@@ -291,9 +348,17 @@ class MainWindow(QtWidgets.QWidget):
             ("状态查询", lambda: self._send(CTRL_CMD_STATUS_GET, b"", "STATUS_GET")),
             ("开机", lambda: self._send(CTRL_CMD_POWER_CTRL, bytes([1]), "POWER ON")),
             ("关机", lambda: self._send(CTRL_CMD_POWER_CTRL, bytes([0]), "POWER OFF")),
-            ("音量设置", lambda: self._send(CTRL_CMD_VOLUME_SET, bytes([self.sp_volume.value()]), "VOLUME_SET")),
+            (
+                "音量设置",
+                lambda: self._send(
+                    CTRL_CMD_VOLUME_SET, bytes([self.sp_volume.value()]), "VOLUME_SET"
+                ),
+            ),
             ("音量查询", lambda: self._send(CTRL_CMD_VOLUME_GET, b"", "VOLUME_GET")),
-            ("解绑(恢复出厂)", lambda: self._send(CTRL_CMD_UNPAIR_REQ, b"", "UNPAIR_REQ")),
+            (
+                "解绑(恢复出厂)",
+                lambda: self._send(CTRL_CMD_UNPAIR_REQ, b"", "UNPAIR_REQ"),
+            ),
             ("时间同步(当前)", self._send_time_now),
             ("UID 查询", lambda: self._send(CTRL_CMD_UID_GET, b"", "UID_GET")),
         ]
@@ -301,7 +366,7 @@ class MainWindow(QtWidgets.QWidget):
             btn = QtWidgets.QPushButton(txt)
             btn.clicked.connect(fn)
             b1.addWidget(btn, i // 2, (i % 2) * 2, 1, 2)
-        b1.addWidget(QtWidgets.QLabel("音量:"), 1, 1)
+        # b1.addWidget(QtWidgets.QLabel("音量"), 1, 1)
         b1.addWidget(self.sp_volume, 1, 3)
         grid.addWidget(box_basic, 0, 0)
 
@@ -330,7 +395,9 @@ class MainWindow(QtWidgets.QWidget):
         btn_mode_set = QtWidgets.QPushButton("模式设置")
         btn_mode_get = QtWidgets.QPushButton("模式查询")
         btn_mode_set.clicked.connect(self._send_mode_set)
-        btn_mode_get.clicked.connect(lambda: self._send(CTRL_CMD_CALM_MODE_GET, b"", "CALM_MODE_GET"))
+        btn_mode_get.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_MODE_GET, b"", "CALM_MODE_GET")
+        )
         b3.addWidget(QtWidgets.QLabel("模式:"), 0, 0)
         b3.addWidget(self.cmb_mode, 0, 1)
         b3.addWidget(btn_mode_set, 1, 0)
@@ -350,7 +417,9 @@ class MainWindow(QtWidgets.QWidget):
         btn_strategy_set = QtWidgets.QPushButton("策略设置")
         btn_strategy_get = QtWidgets.QPushButton("策略查询")
         btn_strategy_set.clicked.connect(self._send_strategy_set)
-        btn_strategy_get.clicked.connect(lambda: self._send(CTRL_CMD_CALM_STRATEGY_GET, b"", "CALM_STRATEGY_GET"))
+        btn_strategy_get.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_STRATEGY_GET, b"", "CALM_STRATEGY_GET")
+        )
         b4.addWidget(self.chk_music, 0, 0)
         b4.addWidget(self.chk_owner, 0, 1)
         b4.addWidget(self.chk_us, 0, 2)
@@ -381,7 +450,9 @@ class MainWindow(QtWidgets.QWidget):
 
     def _send_time_now(self) -> None:
         epoch = int(datetime.datetime.now().timestamp())
-        tz_q15 = int(datetime.datetime.now().astimezone().utcoffset().total_seconds() // 900)
+        tz_q15 = int(
+            datetime.datetime.now().astimezone().utcoffset().total_seconds() // 900
+        )
         payload = bytes(
             [
                 epoch & 0xFF,
@@ -391,7 +462,9 @@ class MainWindow(QtWidgets.QWidget):
                 tz_q15 & 0xFF,
             ]
         )
-        self._send(CTRL_CMD_TIME_SET, payload, f"TIME_SET epoch={epoch} tz_q15={tz_q15}")
+        self._send(
+            CTRL_CMD_TIME_SET, payload, f"TIME_SET epoch={epoch} tz_q15={tz_q15}"
+        )
 
     def _parse_csv_u8(self, txt: str) -> Optional[list]:
         try:
@@ -425,13 +498,22 @@ class MainWindow(QtWidgets.QWidget):
         measure_order = self._parse_csv_u8(self.ed_measure_order.text())
         us_order = self._parse_csv_u8(self.ed_us_order.text())
         if measure_order is None or us_order is None:
-            QtWidgets.QMessageBox.warning(self, "参数错误", "顺序输入格式错误，请用逗号分隔整数")
+            QtWidgets.QMessageBox.warning(
+                self, "参数错误", "顺序输入格式错误，请用逗号分隔整数"
+            )
             return
         if len(measure_order) > 3 or len(us_order) > 3:
-            QtWidgets.QMessageBox.warning(self, "参数错误", "措施顺序和超声顺序最多 3 项")
+            QtWidgets.QMessageBox.warning(
+                self, "参数错误", "措施顺序和超声顺序最多 3 项"
+            )
             return
 
-        payload = bytes([mode, enabled, len(measure_order)] + measure_order + [len(us_order)] + us_order)
+        payload = bytes(
+            [mode, enabled, len(measure_order)]
+            + measure_order
+            + [len(us_order)]
+            + us_order
+        )
         self._send(CTRL_CMD_CALM_STRATEGY_SET, payload, "CALM_STRATEGY_SET")
 
     def _flush_log(self) -> None:
@@ -443,7 +525,9 @@ class MainWindow(QtWidgets.QWidget):
                 break
         if lines:
             self.log.appendPlainText("\n".join(lines))
-            self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+            self.log.verticalScrollBar().setValue(
+                self.log.verticalScrollBar().maximum()
+            )
         self.status.setText("已连接" if self.ctrl.connected else "未连接")
 
     def closeEvent(self, event) -> None:
@@ -470,7 +554,9 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="BLE 可视化控制工具（PyQt 夜间模式）")
-    parser.add_argument("--ble-address", default="", help="BLE MAC 地址，可在界面里再修改")
+    parser.add_argument(
+        "--ble-address", default="", help="BLE MAC 地址，可在界面里再修改"
+    )
     return parser.parse_args()
 
 
