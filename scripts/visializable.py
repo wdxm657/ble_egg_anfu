@@ -26,6 +26,7 @@ CTRL_CMD_OWNER_REC_STOP = 0x21
 CTRL_CMD_OWNER_REC_PLAY = 0x22
 CTRL_CMD_OWNER_REC_DELETE = 0x23
 CTRL_CMD_OWNER_REC_INFO_GET = 0x24
+CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25
 CTRL_CMD_CALM_MODE_SET = 0x30
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
@@ -45,6 +46,7 @@ CMD_NAME = {
     CTRL_CMD_OWNER_REC_PLAY: "OWNER_REC_PLAY",
     CTRL_CMD_OWNER_REC_DELETE: "OWNER_REC_DELETE",
     CTRL_CMD_OWNER_REC_INFO_GET: "OWNER_REC_INFO_GET",
+    CTRL_CMD_OWNER_REC_PLAY_STOP: "OWNER_REC_PLAY_STOP",
     CTRL_CMD_CALM_MODE_SET: "CALM_MODE_SET",
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
     CTRL_CMD_TIME_SET: "TIME_SET",
@@ -165,6 +167,7 @@ async def _bleak_ensure_gatt_ready(client) -> None:
 class BleController:
     def __init__(self):
         self.lines = queue.Queue()
+        self.rsp_frames: "queue.Queue[CtrlFrame]" = queue.Queue()
         self.cmd_q: "queue.Queue[Tuple[int, bytes, str]]" = queue.Queue()
         self.stop_event = threading.Event()
         self.thread: Optional[threading.Thread] = None
@@ -215,6 +218,45 @@ class BleController:
             return f"{base} exist={frame.payload[1]} duration={frame.payload[2]}s"
         if frame.cmd_id == CTRL_CMD_CALM_MODE_GET and len(frame.payload) >= 5:
             return f"{base} mode={frame.payload[1]} us_order={list(frame.payload[2:5])}"
+        if frame.cmd_id == CTRL_CMD_CALM_STRATEGY_GET:
+            p = frame.payload
+            if len(p) >= 4 and p[0] == 0x00:
+                idx = 1
+                mode = p[idx]
+                idx += 1
+                enabled = p[idx]
+                idx += 1
+                measure_cnt = p[idx]
+                idx += 1
+
+                if measure_cnt > 3 or idx + measure_cnt + 1 > len(p):
+                    return f"{base} [ERR] invalid measure section payload={p.hex()}"
+
+                measure_order = list(p[idx : idx + measure_cnt])
+                idx += measure_cnt
+
+                us_cnt = p[idx]
+                idx += 1
+                if us_cnt > 3 or idx + us_cnt > len(p):
+                    return f"{base} [ERR] invalid ultrasonic section payload={p.hex()}"
+
+                us_order = list(p[idx : idx + us_cnt])
+
+                def _measure_name(v: int) -> str:
+                    return {1: "music", 2: "owner_voice", 3: "ultrasonic"}.get(v, f"unknown({v})")
+
+                def _us_name(v: int) -> str:
+                    return {1: "25k", 2: "30k", 3: "25k+30k"}.get(v, f"unknown({v})")
+
+                measure_names = [_measure_name(v) for v in measure_order]
+                us_names = [_us_name(v) for v in us_order]
+                mode_name = "auto" if mode == 0 else ("manual" if mode == 1 else f"unknown({mode})")
+                return (
+                    f"{base} mode={mode}({mode_name}) enabledMask=0x{enabled:02X} "
+                    f"measureOrder={measure_order}({measure_names}) "
+                    f"usOrder={us_order}({us_names})"
+                )
+            return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_UID_GET and len(frame.payload) >= 2:
             return f"{base} payload={frame.payload.hex()}"
         return f"{base} payload={frame.payload.hex()}"
@@ -251,6 +293,7 @@ class BleController:
                     self._chunk_sessions.pop(transfer_id, None)
             return
         if frame.msg_type == CTRL_MSG_TYPE_RSP:
+            self.rsp_frames.put(frame)
             self._log(self._decode_rsp(frame))
             return
         self._log(
@@ -368,6 +411,8 @@ class MainWindow(QtWidgets.QWidget):
             b1.addWidget(btn, i // 2, (i % 2) * 2, 1, 2)
         # b1.addWidget(QtWidgets.QLabel("音量"), 1, 1)
         b1.addWidget(self.sp_volume, 1, 3)
+        # self.lbl_status_query = QtWidgets.QLabel("状态查询结果：-")
+        # b1.addWidget(self.lbl_status_query, 4, 0, 1, 4)
         grid.addWidget(box_basic, 0, 0)
 
         # 录音控制
@@ -377,6 +422,7 @@ class MainWindow(QtWidgets.QWidget):
             ("开始录制", CTRL_CMD_OWNER_REC_START),
             ("结束录制", CTRL_CMD_OWNER_REC_STOP),
             ("试听播放", CTRL_CMD_OWNER_REC_PLAY),
+            ("停止播放", CTRL_CMD_OWNER_REC_PLAY_STOP),
             ("删除录音", CTRL_CMD_OWNER_REC_DELETE),
             ("录音信息", CTRL_CMD_OWNER_REC_INFO_GET),
         ]
@@ -402,6 +448,8 @@ class MainWindow(QtWidgets.QWidget):
         b3.addWidget(self.cmb_mode, 0, 1)
         b3.addWidget(btn_mode_set, 1, 0)
         b3.addWidget(btn_mode_get, 1, 1)
+        self.lbl_mode_query = QtWidgets.QLabel("模式查询结果：-")
+        b3.addWidget(self.lbl_mode_query, 2, 0, 1, 2)
         grid.addWidget(box_mode, 1, 0)
 
         # 安抚策略
@@ -429,6 +477,8 @@ class MainWindow(QtWidgets.QWidget):
         b4.addWidget(self.ed_us_order, 2, 1, 1, 2)
         b4.addWidget(btn_strategy_set, 3, 1)
         b4.addWidget(btn_strategy_get, 3, 2)
+        # self.lbl_strategy_query = QtWidgets.QLabel("策略查询结果：-")
+        # b4.addWidget(self.lbl_strategy_query, 4, 0, 1, 3)
         grid.addWidget(box_strategy, 1, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
@@ -517,6 +567,7 @@ class MainWindow(QtWidgets.QWidget):
         self._send(CTRL_CMD_CALM_STRATEGY_SET, payload, "CALM_STRATEGY_SET")
 
     def _flush_log(self) -> None:
+        self._flush_rsp_frames()
         lines = []
         while True:
             try:
@@ -529,6 +580,78 @@ class MainWindow(QtWidgets.QWidget):
                 self.log.verticalScrollBar().maximum()
             )
         self.status.setText("已连接" if self.ctrl.connected else "未连接")
+
+    def _flush_rsp_frames(self) -> None:
+        while True:
+            try:
+                frame = self.ctrl.rsp_frames.get_nowait()
+            except queue.Empty:
+                break
+            self._apply_rsp_to_ui(frame)
+
+    def _apply_rsp_to_ui(self, frame: CtrlFrame) -> None:
+        if not frame.payload:
+            return
+        status = frame.payload[0]
+        if status != 0x00:
+            return
+
+        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
+            _, pwr, ws, bt, rec, vol, mode, enabled_mask, us_mask = frame.payload[:9]
+            self.sp_volume.setValue(int(vol))
+            self._set_mode_combo(mode)
+            self.chk_music.setChecked(bool(enabled_mask & 0x01))
+            self.chk_owner.setChecked(bool(enabled_mask & 0x02))
+            self.chk_us.setChecked(bool(enabled_mask & 0x04))
+            # self.lbl_strategy_query.setText(
+            #     f"策略镜像：enabledMask=0x{enabled_mask:02X} usMask=0x{us_mask:02X}"
+            # )
+            # self.lbl_status_query.setText(
+            #     f"状态查询结果：pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} "
+            #     f"enabledMask=0x{enabled_mask:02X} usMask=0x{us_mask:02X}"
+            # )
+            return
+
+        if frame.cmd_id == CTRL_CMD_CALM_MODE_GET and len(frame.payload) >= 2:
+            mode = frame.payload[1]
+            self._set_mode_combo(mode)
+            self.lbl_mode_query.setText(f"模式查询结果：mode={mode}")
+            return
+
+        if frame.cmd_id == CTRL_CMD_CALM_STRATEGY_GET and len(frame.payload) >= 4:
+            p = frame.payload
+            idx = 1
+            mode = p[idx]
+            idx += 1
+            enabled = p[idx]
+            idx += 1
+            m_cnt = p[idx]
+            idx += 1
+            if m_cnt > 3 or idx + m_cnt + 1 > len(p):
+                return
+            measure_order = list(p[idx : idx + m_cnt])
+            idx += m_cnt
+            u_cnt = p[idx]
+            idx += 1
+            if u_cnt > 3 or idx + u_cnt > len(p):
+                return
+            us_order = list(p[idx : idx + u_cnt])
+
+            self._set_mode_combo(mode)
+            self.chk_music.setChecked(bool(enabled & 0x01))
+            self.chk_owner.setChecked(bool(enabled & 0x02))
+            self.chk_us.setChecked(bool(enabled & 0x04))
+            self.ed_measure_order.setText(",".join(str(v) for v in measure_order))
+            self.ed_us_order.setText(",".join(str(v) for v in us_order))
+            # self.lbl_strategy_query.setText(
+            #     f"策略查询结果：mode={mode} enabledMask=0x{enabled:02X} "
+            #     f"measureOrder={measure_order} usOrder={us_order}"
+            # )
+
+    def _set_mode_combo(self, mode: int) -> None:
+        idx = self.cmb_mode.findData(int(mode))
+        if idx >= 0:
+            self.cmb_mode.setCurrentIndex(idx)
 
     def closeEvent(self, event) -> None:
         self.ctrl.stop()

@@ -176,7 +176,17 @@ Byte6.. payload
 - 示例响应帧（hex）：`01 02 22 01 01 00 00`
 - 失败响应帧示例（无录音文件）：`01 02 22 01 02 00 06 00`
 
-10) `0x23 OWNER_REC_DELETE`  
+10) `0x25 OWNER_REC_PLAY_STOP`  
+- 功能：停止当前播放（非暂停）。  
+- 请求：空  
+- 响应：`[status]`
+- 响应字段解读与使用：
+  - `status=0x00`：停止命令执行成功，APP 应立即退出“播放中”状态。
+  - 该命令为幂等调用，未播放时也可返回成功。
+- 示例请求帧（hex）：`01 01 25 01 00 00`
+- 示例响应帧（hex）：`01 02 25 01 01 00 00`
+
+11) `0x23 OWNER_REC_DELETE`  
 - 功能：删除主人录音文件。  
 - 请求：空  
 - 响应：`[status]`
@@ -187,7 +197,7 @@ Byte6.. payload
 - 示例响应帧（hex）：`01 02 23 01 01 00 00`
 - 失败响应帧示例（无录音文件）：`01 02 23 01 02 00 06 00`
 
-11) `0x24 OWNER_REC_INFO_GET`  
+12) `0x24 OWNER_REC_INFO_GET`  
 - 功能：查询主人录音是否存在及时长（秒）。  
 - 请求：空  
 - 响应：`[status, exist, durationSec]`
@@ -220,6 +230,22 @@ Byte6.. payload
 - 请求：空  
 - 响应：  
   `[status, mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
+- 响应字段解读与使用：
+  - `status`：先判断是否为 `0x00`；非 `0x00` 时按错误处理，不解析后续字段。
+  - `mode`：`0=自动调整`，`1=人工干预`。
+  - `enabledMask`：bit0=音乐，bit1=主人录音，bit2=超声；前端可直接用于勾选态恢复。
+  - `measureOrderCount`：后续 `measureOrder` 数组长度（0~3）。
+  - `measureOrder`：元素取值 `1=音乐，2=主人录音，3=超声`，表示主措施执行顺序。
+  - `usOrderCount`：后续 `usOrder` 数组长度（0~3）。
+  - `usOrder`：元素取值 `1=25kHz，2=30kHz，3=25&30kHz`，表示超声子顺序。
+- 前端解析伪代码：
+  - `idx=1`（跳过 status）
+  - `mode=payload[idx++]`
+  - `enabledMask=payload[idx++]`
+  - `mCnt=payload[idx++]`
+  - `measureOrder=payload[idx:idx+mCnt]; idx+=mCnt`
+  - `uCnt=payload[idx++]`
+  - `usOrder=payload[idx:idx+uCnt]`
 
 17) `0x32 TIME_SET`  
 - 请求：`[epochSec(u32), tzQ15(s8)]`  
@@ -312,10 +338,13 @@ ByteN+1 crcH
 6) `0x22 SOC_OWNER_REC_PLAY`  
 - `payload=[]`
 
-7) `0x23 SOC_OWNER_REC_DELETE`  
+7) `0x25 SOC_OWNER_REC_PLAY_STOP`  
 - `payload=[]`
 
-8) `0x24 SOC_OWNER_REC_INFO_GET`  
+8) `0x23 SOC_OWNER_REC_DELETE`  
+- `payload=[]`
+
+9) `0x24 SOC_OWNER_REC_INFO_GET`  
 - `payload=[]`
 
 9) `0x30 SOC_CALM_MODE_SET`  
@@ -324,19 +353,23 @@ ByteN+1 crcH
 10) `0x31 SOC_CALM_STRATEGY_SET`  
 - 与 BLE `CALM_STRATEGY_SET` 结构一致，MCU 透传并可做基础参数校验。
 
-11) `0x32 SOC_TIME_SET`  
+11) `0x33 SOC_CALM_STRATEGY_GET`  
+- `payload=[]`
+- 响应：`[status, mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
+
+12) `0x32 SOC_TIME_SET`  
 - `payload=[epochSec(u32), tzQ15(s8)]`
 - 处理约定：
   - SOC 使用 `clock_settime/settimeofday` 落系统时间（`epochSec`）。
   - SOC 使用 `setenv("TZ", ...)+tzset()` 落系统时区（`tzQ15`，15 分钟单位）。
 
-12) `0x40 SOC_LOG_PULL`  
+13) `0x40 SOC_LOG_PULL`  
 - `payload=[days, pageIdx, pageSize]`
 
-13) `0x50 SOC_FACTORY_RESET`  
+14) `0x50 SOC_FACTORY_RESET`  
 - `payload=[reason]`（1=解绑触发）
 
-14) `0x60 SOC_BT_LINK_STATE_NOTIFY`  
+15) `0x60 SOC_BT_LINK_STATE_NOTIFY`  
 - `payload=[linked]`（给 SOC 感知 App 在线状态，可选）
 
 ## 4.4 UART SOC -> MCU 事件清单（必须支持）
