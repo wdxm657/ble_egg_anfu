@@ -60,12 +60,12 @@ Byte6.. payload
 - `0x01` LEN_ERROR
 - `0x02` UNSUPPORTED_CMD
 - `0x03` PARAM_ERROR
-- `0x04` BUSY
-- `0x05` STATE_CONFLICT（当前状态不允许）
-- `0x06` NO_OWNER_VOICE（无主人录音）
-- `0x07` STORAGE_ERROR
-- `0x08` SOC_TIMEOUT
-- `0x09` INTERNAL_ERROR
+- `0x04` INTERNAL_ERROR
+- `0x05` BUSY
+- `0x06` STATE_CONFLICT（当前状态不允许）
+- `0x07` NO_OWNER_VOICE（无主人录音）
+- `0x08` STORAGE_ERROR
+- `0x09` SOC_TIMEOUT
 
 ## 3.4 状态枚举
 
@@ -87,7 +87,7 @@ Byte6.. payload
   - `0x00`：成功，后续字段有效。
   - `0x01`：参数或长度错误（按当前接口语义归并为参数错误），后续字段仅作参考。
   - `0x03`：业务参数错误（如录音时长不足 3 秒），APP 应提示用户重试。
-  - `0x06`：无主人录音（当前映射 `NO_OWNER_VOICE`），APP 应引导先录音。
+  - `0x07`：无主人录音（当前映射 `NO_OWNER_VOICE`），APP 应引导先录音。
   - `0x08`：SOC 超时，APP 可做重试或提示设备忙。
   - `0x09`：内部错误，APP 提示稍后重试。
 - `seq`：请求序号回显，APP 需用它匹配当前请求与响应。
@@ -419,7 +419,7 @@ ByteN+1 crcH
 5) `0x84 SOC_OWNER_REC_EVT`  
 - `payload=[eventType, status, durationSec]`
   - `eventType=0x01`：录音到达 `10s` 上限后 SOC 自动停录（无需 MCU 再发 STOP）。
-  - `status`：按 BLE 侧状态码语义映射（`0x00=OK,0x03=PARAM_ERROR,0x09=INTERNAL_ERROR`）。
+  - `status`：按 BLE 侧状态码语义映射（`0x00=OK,0x03=PARAM_ERROR,0x04=INTERNAL_ERROR`）。
   - `durationSec`：最终录音秒数（0~10）。
   - MCU 收到后应立即退出本地“录制中”状态，并向 APP 透出录音结束事件。
 

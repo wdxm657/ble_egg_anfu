@@ -60,6 +60,19 @@ CMD_NAME = {
     CTRL_CMD_TEXT_CHUNK: "TEXT_CHUNK",
 }
 
+STATUS_NAME = {
+    0x00: "OK",
+    0x01: "LEN_ERROR",
+    0x02: "UNSUPPORTED_CMD",
+    0x03: "PARAM_ERROR",
+    0x04: "INTERNAL_ERROR",
+    0x05: "BUSY",
+    0x06: "STATE_CONFLICT",
+    0x07: "NO_OWNER_VOICE",
+    0x08: "STORAGE_ERROR",
+    0x09: "SOC_TIMEOUT",
+}
+
 CTRL_RX_RAW_BYTES = bytes(
     [
         0x01,
@@ -212,7 +225,8 @@ class BleController:
 
     def _decode_rsp(self, frame: CtrlFrame) -> str:
         status = frame.payload[0] if frame.payload else 0xFF
-        base = f"[RSP] {CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))} status=0x{status:02X}"
+        status_name = STATUS_NAME.get(status, "UNKNOWN")
+        base = f"[RSP] {CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))} status=0x{status:02X}({status_name})"
         if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
             _, pwr, ws, bt, rec, vol, mode, em, um = frame.payload[:9]
             return f"{base} pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
