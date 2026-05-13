@@ -677,6 +677,7 @@ int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
         // tl_printf("\r\n");
     }
 #endif
+    sleep_us(10000);
     if (BLS_CONN_HANDLE != 0xFFFF)
     {
         blc_gatt_pushHandleValueNotify(BLS_CONN_HANDLE, CUSTOM_COUNTER_READ_DP_H, g_ctrlTxBuf, totalLen);

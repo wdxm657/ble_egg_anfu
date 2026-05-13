@@ -895,14 +895,6 @@ void                           app_flash_protection_operation(u8 flash_op_evt, u
 }
 #endif
 
-float a_ang   = 0;
-float a_sin   = 0;
-float a_cos   = 0;
-float a_tan   = 0;
-float a_cot   = 0;
-float a_atan2 = 0;
-float a_sqrt3 = 0;
-
 #define FUNC_ELAPSED_TEST 0
 /**
  * @brief     BLE main loop
