@@ -120,8 +120,8 @@ int app_uart_send_cmd_with_cb(
         }
         if (slot < 0)
         {
-            return -2;
             BLE_LOG_D("app_uart_send_cmd_with_cb slot < 0");
+            return -2;
         }
         g_uart_pending[slot].inUse    = 1;
         g_uart_pending[slot].cmdId    = cmdId;
@@ -265,7 +265,7 @@ static void app_uart_try_parse_one(void)
 void app_uart_init(void)
 {
     // USART initial for SOC communication (PC1:TX, PC0:RX, 115200 8N1)
-    uart_gpio_set(GPIO_PC1, GPIO_PC0);
+    uart_gpio_set(GPIO_PD3, GPIO_PD2);
     uart_init_baudrate(115200, CLOCK_SYS_CLOCK_HZ, PARITY_NONE, STOP_BIT_ONE);
     uart_dma_enable(0, 0);
     uart_ndma_clear_rx_index();

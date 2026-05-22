@@ -369,6 +369,21 @@ static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payl
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
+static void app_ctrl_evt_work_state_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen < 2)
+    {
+        return;
+    }
+
+    g_ctrlState.workState = payload[0];
+    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_WORK_STATE_CHANGED, g_ctrlSeq++, payload, 2);
+}
+
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
     (void)cmdId;
@@ -1235,6 +1250,7 @@ void app_ctrl_init(void)
     g_ctrlSeq            = 0;
     g_ctrlState.btLinked = 1;
     g_timeCache.valid    = 0;
+    app_uart_register_evt_handler(UART_SOC_WORK_STATE_EVT, app_ctrl_evt_work_state_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_OWNER_REC_EVT, app_ctrl_evt_owner_rec_from_soc, 0);
 }
 

@@ -30,6 +30,7 @@ enum{
     UART_SOC_CALM_RECORD_GET    = 0x41,
     UART_SOC_FACTORY_RESET      = 0x50,
     UART_SOC_BT_LINK_NOTIFY     = 0x60,
+    UART_SOC_WORK_STATE_EVT     = 0x80,
     UART_SOC_OWNER_REC_EVT      = 0x84,
 };
 

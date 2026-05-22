@@ -49,6 +49,8 @@ enum{
     CTRL_CMD_TIME_SET        = 0x32,   // set device time (YYYY-MM-DD HH:MM:SS)
     CTRL_CMD_UID_GET         = 0x34,   // get flash UID (16 bytes, split into 2 responses)
 
+    CTRL_CMD_WORK_STATE_CHANGED = 0x80,  // work state event (device -> APP)
+
 	CTRL_CMD_TEXT_CHUNK = 0x40,   // long text transfer in chunks
 
     // Factory reset: clear owner voice, comfort config, comfort records
