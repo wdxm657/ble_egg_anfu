@@ -17,71 +17,78 @@
  */
 
 // Protocol version
-#define CTRL_PROTO_VERSION               0x01
+#define CTRL_PROTO_VERSION 0x01
 
 // Message types
-enum{
+enum
+{
     CTRL_MSG_TYPE_CMD   = 0x01,
     CTRL_MSG_TYPE_RSP   = 0x02,
     CTRL_MSG_TYPE_EVENT = 0x03,
 };
 
 // Command IDs (can be extended freely)
-enum{
-    CTRL_CMD_POWER_CTRL = 0x12,   // power on/off for auto play
-    CTRL_CMD_STATUS_GET = 0x13,   // get device status (power/boundary/height)
+enum
+{
+    CTRL_CMD_POWER_CTRL = 0x12,  // power on/off for auto play
+    CTRL_CMD_STATUS_GET = 0x13,  // get device status (power/boundary/height)
     CTRL_CMD_VOLUME_SET = 0x14,
     CTRL_CMD_VOLUME_GET = 0x15,
 
-    CTRL_CMD_OWNER_REC_START    = 0x20,
-    CTRL_CMD_OWNER_REC_STOP     = 0x21,
-    CTRL_CMD_OWNER_REC_PLAY     = 0x22,
-    CTRL_CMD_OWNER_REC_DELETE   = 0x23,
-    CTRL_CMD_OWNER_REC_INFO_GET = 0x24,
-    CTRL_CMD_OWNER_REC_PLAY_STOP= 0x25,
+    CTRL_CMD_OWNER_REC_START     = 0x20,
+    CTRL_CMD_OWNER_REC_STOP      = 0x21,
+    CTRL_CMD_OWNER_REC_PLAY      = 0x22,
+    CTRL_CMD_OWNER_REC_DELETE    = 0x23,
+    CTRL_CMD_OWNER_REC_INFO_GET  = 0x24,
+    CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25,
 
     CTRL_CMD_CALM_MODE_SET     = 0x30,
     CTRL_CMD_CALM_MODE_GET     = 0x31,
     CTRL_CMD_CALM_RECORD_GET   = 0x33,
+    CTRL_CMD_CALM_RECORD_DELETE = 0x3A,
     CTRL_CMD_CALM_STRATEGY_SET = 0x37,
     CTRL_CMD_CALM_STRATEGY_GET = 0x38,
 
-    CTRL_CMD_TIME_SET        = 0x32,   // set device time (YYYY-MM-DD HH:MM:SS)
-    CTRL_CMD_UID_GET         = 0x34,   // get flash UID (16 bytes, split into 2 responses)
+    CTRL_CMD_TIME_SET = 0x32,  // set device time (YYYY-MM-DD HH:MM:SS)
+    CTRL_CMD_UID_GET  = 0x34,  // get flash UID (16 bytes, split into 2 responses)
 
     CTRL_CMD_WORK_STATE_CHANGED = 0x80,  // work state event (device -> APP)
 
-	CTRL_CMD_TEXT_CHUNK = 0x40,   // long text transfer in chunks
+    CTRL_CMD_TEXT_CHUNK = 0x40,  // long text transfer in chunks
 
     // Factory reset: clear owner voice, comfort config, comfort records
     CTRL_CMD_FACTORY_RESET = 0x50,
 };
 
 // Error codes for response payload[0]
-enum{
-    CTRL_STATUS_OK              = 0x00,
-    CTRL_STATUS_LEN_ERROR       = 0x01,
-    CTRL_STATUS_UNSUPPORTED_CMD = 0x02,
-    CTRL_STATUS_PARAM_ERROR     = 0x03,
-    CTRL_STATUS_INTERNAL_ERROR  = 0x04,
-    CTRL_STATUS_BUSY            = 0x05,
-    CTRL_STATUS_STATE_CONFLICT  = 0x06,
-    CTRL_STATUS_NO_OWNER_VOICE  = 0x07,
-    CTRL_STATUS_STORAGE_ERROR   = 0x08,
-    CTRL_STATUS_SOC_TIMEOUT     = 0x09,
+enum
+{
+    CTRL_STATUS_OK = 0x00,
+    CTRL_STATUS_LEN_ERROR,
+    CTRL_STATUS_UNSUPPORTED_CMD,
+    CTRL_STATUS_PARAM_ERROR,
+    CTRL_STATUS_INTERNAL_ERROR,
+    CTRL_STATUS_BUSY,
+    CTRL_STATUS_SOC_TIMEOUT,
+    CTRL_STATUS_SOC_ERROR
 };
 
 // ATT value max length for RX/TX.
 // 受 MCU RAM 限制，此处仅支持单帧 20 字节（默认 MTU=23 时 ATT 有效负载为 20）。
-#define CTRL_RX_MAX_LEN                 20
-#define CTRL_TX_MAX_LEN                 20
+#define CTRL_RX_MAX_LEN          20
+#define CTRL_TX_MAX_LEN          20
 // 每个 TEXT_CHUNK 分片内可携带的纯文本字节数（注意头+分片字段总长必须 ≤ 20）
-#define CTRL_TEXT_CHUNK_DATA_MAX        10
+#define CTRL_TEXT_CHUNK_DATA_MAX 10
 
 // Global RX/TX buffers used by ATT layer & control layer
 extern u8 g_ctrlRxBuf[CTRL_RX_MAX_LEN];
 extern u8 g_ctrlTxBuf[CTRL_TX_MAX_LEN];
 
+/**
+ * @brief   Check if SOC is online via heartbeat
+ * @return  1=online, 0=offline
+ */
+u8 app_ctrl_is_soc_online(void);
 
 /**
  * @brief   Initialize control module
@@ -134,6 +141,8 @@ static inline void app_ctrl_text_send_str(const char *s)
     app_ctrl_text_send_bytes((const u8 *)s, (u16)strlen(s));
 }
 
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+
 #if DEBUG_MODE
 /**
  * @brief   Use this macro at LOG sites to send the formatted string to PC over BLE.
@@ -142,16 +151,15 @@ static inline void app_ctrl_text_send_str(const char *s)
  * @note    Buffer is limited (local stack). Long lines will be truncated.
  *          Payload is chunked internally to fit 20-byte ATT values.
  */
-#define BLE_LOG_D(fmt, ...)                                                                 \
-    do                                                                                      \
-    {                                                                                       \
-        char _ble_log_buf[96];                                                              \
-        tl_sprintf(_ble_log_buf, fmt "\r\n", ##__VA_ARGS__);                                \
-        app_ctrl_text_send_bytes((const u8 *)_ble_log_buf, (u16)strlen(_ble_log_buf));      \
+#define BLE_LOG_D(fmt, ...)                                                                      \
+    do                                                                                           \
+    {                                                                                            \
+        char _ble_log_buf[128];                                                                  \
+        tl_sprintf(_ble_log_buf, "[%s:%d]: " fmt "\r\n", __FILENAME__, __LINE__, ##__VA_ARGS__); \
+        app_ctrl_text_send_bytes((const u8 *)_ble_log_buf, (u16)strlen(_ble_log_buf));           \
     } while (0)
 #else
 #define BLE_LOG_D(fmt, ...) ((void)0)
 #endif
 
 #endif /* APP_CTRL_H_ */
-

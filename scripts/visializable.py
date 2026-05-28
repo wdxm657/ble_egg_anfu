@@ -31,6 +31,7 @@ CTRL_CMD_CALM_MODE_SET = 0x30
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
 CTRL_CMD_CALM_RECORD_GET = 0x33
+CTRL_CMD_CALM_RECORD_DELETE = 0x3A
 CTRL_CMD_UID_GET = 0x34
 CTRL_CMD_CALM_STRATEGY_SET = 0x37
 CTRL_CMD_CALM_STRATEGY_GET = 0x38
@@ -38,7 +39,6 @@ CTRL_CMD_FACTORY_RESET = 0x50
 CTRL_CMD_TEXT_CHUNK = 0x40
 
 CMD_NAME = {
-    CTRL_CMD_UNPAIR_REQ: "UNPAIR_REQ",
     CTRL_CMD_POWER_CTRL: "POWER_CTRL",
     CTRL_CMD_STATUS_GET: "STATUS_GET",
     CTRL_CMD_VOLUME_SET: "VOLUME_SET",
@@ -52,6 +52,7 @@ CMD_NAME = {
     CTRL_CMD_CALM_MODE_SET: "CALM_MODE_SET",
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
     CTRL_CMD_CALM_RECORD_GET: "CALM_RECORD_GET",
+    CTRL_CMD_CALM_RECORD_DELETE: "CALM_RECORD_DELETE",
     CTRL_CMD_TIME_SET: "TIME_SET",
     CTRL_CMD_CALM_STRATEGY_SET: "CALM_STRATEGY_SET",
     CTRL_CMD_UID_GET: "UID_GET",
@@ -277,16 +278,36 @@ class BleController:
             return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_GET:
             p = frame.payload
-            if len(p) >= 12 and p[0] == 0x00:
-                count = p[1]
-                idx = p[2]
-                start_ts = int.from_bytes(p[3:7], "little", signed=False)
-                end_ts = int.from_bytes(p[7:11], "little", signed=False)
-                tz = int.from_bytes(p[11:12], "little", signed=True)
-                end_txt = "RUNNING" if end_ts == 0xFFFFFFFF else str(end_ts)
+            if len(p) >= 9 and p[0] == 0x00:
+                remaining = p[1]
+                entry_idx = p[2]
+                total_entries = p[3]
+                entry_type = p[4]
+                ts = int.from_bytes(p[5:9], "little", signed=False)
+
+                type_names = {
+                    0x01: "BARK",
+                    0x02: "MUSIC",
+                    0x03: "OWNER",
+                    0x04: "US_25K",
+                    0x05: "US_30K",
+                    0x06: "US_DUAL",
+                    0x10: "SUCCESS",
+                    0x11: "FAIL",
+                }
+                tname = type_names.get(entry_type, f"UNKNOWN(0x{entry_type:02X})")
                 return (
-                    f"{base} count={count} index={idx} start={start_ts} end={end_txt} tz_q15={tz}"
+                    f"{base} entry {entry_idx}/{total_entries} "
+                    f"type=0x{entry_type:02X}({tname}) ts={ts} "
+                    f"remainingRecords={remaining}"
                 )
+            if len(p) == 1 and p[0] == 0x00:
+                return f"{base} no records"
+            return f"{base} payload={p.hex()}"
+        if frame.cmd_id == CTRL_CMD_CALM_RECORD_DELETE:
+            p = frame.payload
+            if len(p) >= 2 and p[0] == 0x00:
+                return f"{base} remainingRecords={p[1]}"
             return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_UID_GET and len(frame.payload) >= 2:
             return f"{base} payload={frame.payload.hex()}"
@@ -429,10 +450,6 @@ class MainWindow(QtWidgets.QWidget):
                 ),
             ),
             ("音量查询", lambda: self._send(CTRL_CMD_VOLUME_GET, b"", "VOLUME_GET")),
-            (
-                "解绑(恢复出厂)",
-                lambda: self._send(CTRL_CMD_UNPAIR_REQ, b"", "UNPAIR_REQ"),
-            ),
             ("恢复出厂(仅清数据)", lambda: self._send(CTRL_CMD_FACTORY_RESET, bytes([1]), "FACTORY_RESET reason=1")),
             ("时间同步(当前)", self._send_time_now),
             ("UID 查询", lambda: self._send(CTRL_CMD_UID_GET, b"", "UID_GET")),
@@ -480,11 +497,16 @@ class MainWindow(QtWidgets.QWidget):
         b3.addWidget(self.cmb_mode, 0, 1)
         b3.addWidget(btn_mode_set, 1, 0)
         b3.addWidget(btn_mode_get, 1, 1)
-        btn_record_get = QtWidgets.QPushButton("安抚记录查询")
+        btn_record_get = QtWidgets.QPushButton("安抚记录获取")
         btn_record_get.clicked.connect(
-            lambda: self._send(CTRL_CMD_CALM_RECORD_GET, bytes([16]), "CALM_RECORD_GET maxCount=16")
+            lambda: self._send(CTRL_CMD_CALM_RECORD_GET, b"", "CALM_RECORD_GET")
         )
-        b3.addWidget(btn_record_get, 2, 0, 1, 2)
+        btn_record_del = QtWidgets.QPushButton("安抚记录删除")
+        btn_record_del.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_RECORD_DELETE, b"", "CALM_RECORD_DELETE")
+        )
+        b3.addWidget(btn_record_get, 2, 0)
+        b3.addWidget(btn_record_del, 2, 1)
         self.lbl_mode_query = QtWidgets.QLabel("模式查询结果：-")
         b3.addWidget(self.lbl_mode_query, 3, 0, 1, 2)
         grid.addWidget(box_mode, 1, 0)

@@ -239,7 +239,10 @@ static void app_uart_try_parse_one(void)
         u8        cmdId   = g_uart_soc_rx_buf[4];
         u8        seq     = g_uart_soc_rx_buf[5];
         const u8 *payload = &g_uart_soc_rx_buf[8];
-        BLE_LOG_D("[SOC_FRAME] t=0x%02x cmd=0x%02x seq=%d len=%d", msgType, cmdId, seq, payloadLen);
+        if (cmdId != 0x87)
+        {
+            BLE_LOG_D("[SOC_FRAME] t=0x%02x cmd=0x%02x seq=%d len=%d", msgType, cmdId, seq, payloadLen);
+        }
 
         if (msgType == UART_MSG_RSP)
         {
