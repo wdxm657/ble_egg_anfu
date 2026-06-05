@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UART 超声波模组通信协议</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --accent: #2563eb; --border: #dee2e6; --text: #1a1a2e; --muted: #6c757d; --code-bg: #1e1e2e; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 24px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.8rem; margin-bottom: 8px; color: var(--accent); }
+  .subtitle { color: var(--muted); margin-bottom: 32px; font-size: 0.95rem; }
+  h2 { font-size: 1.35rem; margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+  h3 { font-size: 1.1rem; margin: 24px 0 12px; color: #333; }
+  h4 { font-size: 1rem; margin: 16px 0 8px; color: #444; }
+  p { margin-bottom: 12px; }
+  ul, ol { margin: 8px 0 16px 20px; }
+  li { margin-bottom: 4px; }
+
+  /* Cards */
+  .section-card { background: var(--card); border-radius: 10px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+
+  /* Tables */
+  .proto-table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 0.92rem; }
+  .proto-table th, .proto-table td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  .proto-table th { background: #f0f4ff; font-weight: 600; white-space: nowrap; }
+  .proto-table td code { background: #f0f4ff; padding: 1px 5px; border-radius: 3px; font-size: .88em; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  .proto-table tr:hover { background: #fafbfc; }
+
+  /* Code blocks */
+  pre { background: var(--code-bg); color: #cdd6f4; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: .88rem; line-height: 1.5; margin: 12px 0 16px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  .hex-dump { color: #89b4fa; }
+  .hex-dump .dir { color: #a6e3a1; }
+  .hex-dump .resp { color: #fab387; }
+  .hl-comment { color: #6c7086; }
+
+  /* Status badges */
+  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .82rem; font-weight: 600; }
+  .status-ok { background: #dcfce7; color: #166534; }
+  .status-fail { background: #fce4ec; color: #b71c1c; }
+  .status-invalid { background: #fff3e0; color: #e65100; }
+
+  /* Info boxes */
+  .info-box { background: #f0f4ff; border-left: 4px solid var(--accent); padding: 12px 16px; border-radius: 6px; margin: 12px 0 16px; font-size: .92rem; }
+  .info-box strong { color: var(--accent); }
+
+  /* Mermaid diagram placeholder */
+  .mermaid-box { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0 16px; text-align: center; }
+  .mermaid-box svg { max-width: 100%; }
+
+  /* Layout */
+  .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0 16px; }
+  .cmd-grid .cmd-item { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .cmd-grid .cmd-item h4 { margin: 0 0 8px; font-size: .95rem; }
+  .cmd-grid .cmd-item p { margin: 0; font-size: .85rem; color: var(--muted); }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    body { padding: 12px; }
+    .section-card { padding: 16px; }
+    .cmd-grid { grid-template-columns: 1fr; }
+    .proto-table { font-size: .82rem; }
+    .proto-table th, .proto-table td { padding: 6px 8px; }
+  }
+
+  /* Print */
+  @media print {
+    body { padding: 0; background: #fff; }
+    .section-card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>UART 超声波模组通信协议</h1>
+<p class="subtitle">版本 1.0 &mdash; 定义主机（MCU）与超声波模组之间的 UART 通信协议</p>
+
+<!-- ===== 1. 概述 ===== -->
+<section class="section-card">
+<h2>1. 概述</h2>
+<p>主机通过串口向模组下发配置和发射指令，模组执行后返回应答帧。</p>
+<ul>
+  <li><strong>物理层：</strong>UART，3.3V TTL 电平</li>
+  <li><strong>波特率：</strong>115200 bps</li>
+  <li><strong>数据位：</strong>8</li>
+  <li><strong>停止位：</strong>1</li>
+  <li><strong>校验位：</strong>无</li>
+  <li><strong>通信方式：</strong>半双工，主机主动发送请求，模组回复应答</li>
+</ul>
+</section>
+
+<!-- ===== 2. 通用约定 ===== -->
+<section class="section-card">
+<h2>2. 通用约定</h2>
+
+<h3>2.1 帧格式</h3>
+<p>所有指令和应答均采用定长或变长帧，结构如下：</p>
+<table class="proto-table">
+  <thead>
+    <tr><th>偏移</th><th>长度(字节)</th><th>字段</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td>1</td><td><code>HEAD</code></td><td>帧头，固定 <code>0xAA</code></td></tr>
+    <tr><td>1</td><td>1</td><td><code>CMD</code></td><td>命令字，见 §3</td></tr>
+    <tr><td>2</td><td>1</td><td><code>LEN</code></td><td>数据区长度（0 ~ 32），不含 HEAD/CMD/LEN/CHECK</td></tr>
+    <tr><td>3</td><td>LEN</td><td><code>DATA</code></td><td>数据区，内容依赖 CMD</td></tr>
+    <tr><td>3+LEN</td><td>1</td><td><code>CHECK</code></td><td>校验和 = HEAD + CMD + LEN + DATA 各字节累加和，取低 8 位</td></tr>
+  </tbody>
+</table>
+
+<h3>2.2 应答帧格式</h3>
+<p>模组对每个有效指令回复一个应答帧：</p>
+<table class="proto-table">
+  <thead>
+    <tr><th>偏移</th><th>长度(字节)</th><th>字段</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td>1</td><td><code>HEAD</code></td><td>帧头，固定 <code>0xAA</code></td></tr>
+    <tr><td>1</td><td>1</td><td><code>CMD</code></td><td>命令字，与请求帧相同</td></tr>
+    <tr><td>2</td><td>1</td><td><code>LEN</code></td><td><code>0x01</code></td></tr>
+    <tr><td>3</td><td>1</td><td><code>STATUS</code></td><td>执行状态</td></tr>
+    <tr><td>4</td><td>1</td><td><code>CHECK</code></td><td>校验和</td></tr>
+  </tbody>
+</table>
+
+<p><strong>STATUS 取值：</strong></p>
+<table class="proto-table">
+  <thead>
+    <tr><th>取值</th><th>含义</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>0x00</code></td><td><span class="status-badge status-ok">成功</span></td><td>指令已正确执行</td></tr>
+    <tr><td><code>0x01</code></td><td><span class="status-badge status-fail">失败</span></td><td>指令执行失败，参数或硬件异常</td></tr>
+    <tr><td><code>0x02</code></td><td><span class="status-badge status-invalid">无效命令</span></td><td>CMD 值未定义或当前状态下不支持</td></tr>
+  </tbody>
+</table>
+
+<h3>2.3 超时与重试</h3>
+<ul>
+  <li>主机发送请求后，应在 <strong>100 ms</strong> 内收到应答，否则视为超时。</li>
+  <li>超时后主机可重试最多 <strong>2 次</strong>，间隔 <strong>50 ms</strong>。</li>
+  <li>连续 3 次失败后主机应报错，不再自动重试。</li>
+</ul>
+</section>
+
+<!-- ===== 3. 指令定义 ===== -->
+<section class="section-card">
+<h2>3. 指令定义</h2>
+
+<!-- 3.1 -->
+<h3>3.1 配置超声波发射频率为 25KHz</h3>
+<p><strong>用途：</strong>将模组超声波发射频率设置为 25KHz 单频模式。</p>
+<p><strong>调用方 / 前置条件：</strong>模组空闲或已停止发射。</p>
+<h4>请求</h4>
+<table class="proto-table">
+  <thead><tr><th>字段</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>HEAD</code></td><td><code>0xAA</code></td><td></td></tr>
+    <tr><td><code>CMD</code></td><td><code>0x01</code></td><td></td></tr>
+    <tr><td><code>LEN</code></td><td><code>0x00</code></td><td>无数据区</td></tr>
+    <tr><td><code>CHECK</code></td><td><code>0xAB</code></td><td><code>0xAA+0x01+0x00 = 0xAB</code></td></tr>
+  </tbody>
+</table>
+<p><strong>应答：</strong>通用应答帧（见 §2.2），CMD=<code>0x01</code>。</p>
+<pre><span class="hex-dump"><span class="dir">请求：</span> AA 01 00 AB
+<span class="resp">应答：</span> AA 01 01 00 AC</span></pre>
+
+<hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);">
+
+<!-- 3.2 -->
+<h3>3.2 配置超声波发射频率为 30KHz</h3>
+<p><strong>用途：</strong>将模组超声波发射频率设置为 30KHz 单频模式。</p>
+<p><strong>调用方 / 前置条件：</strong>模组空闲或已停止发射。</p>
+<h4>请求</h4>
+<table class="proto-table">
+  <thead><tr><th>字段</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>HEAD</code></td><td><code>0xAA</code></td><td></td></tr>
+    <tr><td><code>CMD</code></td><td><code>0x02</code></td><td></td></tr>
+    <tr><td><code>LEN</code></td><td><code>0x00</code></td><td>无数据区</td></tr>
+    <tr><td><code>CHECK</code></td><td><code>0xAC</code></td><td><code>0xAA+0x02+0x00 = 0xAC</code></td></tr>
+  </tbody>
+</table>
+<p><strong>应答：</strong>通用应答帧（见 §2.2），CMD=<code>0x02</code>。</p>
+<pre><span class="hex-dump"><span class="dir">请求：</span> AA 02 00 AC
+<span class="resp">应答：</span> AA 02 01 00 AD</span></pre>
+
+<hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);">
+
+<!-- 3.3 -->
+<h3>3.3 配置超声波发射频率为 25KHz + 30KHz</h3>
+<p><strong>用途：</strong>将模组超声波发射频率设置为 25KHz 和 30KHz 混合模式（双频交替或同时输出，视模组硬件能力而定）。</p>
+<p><strong>调用方 / 前置条件：</strong>模组空闲或已停止发射。</p>
+<h4>请求</h4>
+<table class="proto-table">
+  <thead><tr><th>字段</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>HEAD</code></td><td><code>0xAA</code></td><td></td></tr>
+    <tr><td><code>CMD</code></td><td><code>0x03</code></td><td></td></tr>
+    <tr><td><code>LEN</code></td><td><code>0x00</code></td><td>无数据区</td></tr>
+    <tr><td><code>CHECK</code></td><td><code>0xAD</code></td><td><code>0xAA+0x03+0x00 = 0xAD</code></td></tr>
+  </tbody>
+</table>
+<p><strong>应答：</strong>通用应答帧（见 §2.2），CMD=<code>0x03</code>。</p>
+<pre><span class="hex-dump"><span class="dir">请求：</span> AA 03 00 AD
+<span class="resp">应答：</span> AA 03 01 00 AE</span></pre>
+
+<hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);">
+
+<!-- 3.4 -->
+<h3>3.4 开启 / 关闭超声波变压器</h3>
+<p><strong>用途：</strong>控制超声波变压器高压输出的通断。发射超声波前需先开启变压器。</p>
+<p><strong>调用方 / 前置条件：</strong>无。</p>
+<h4>请求</h4>
+<table class="proto-table">
+  <thead><tr><th>字段</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>HEAD</code></td><td><code>0xAA</code></td><td></td></tr>
+    <tr><td><code>CMD</code></td><td><code>0x04</code></td><td></td></tr>
+    <tr><td><code>LEN</code></td><td><code>0x01</code></td><td>数据区长度为 1</td></tr>
+    <tr><td><code>DATA[0]</code></td><td><code>0x00</code> ~ <code>0x01</code></td><td><code>0x00</code> = 关闭变压器，<code>0x01</code> = 开启变压器</td></tr>
+    <tr><td><code>CHECK</code></td><td>计算结果</td><td>整帧校验和</td></tr>
+  </tbody>
+</table>
+<p><strong>应答：</strong>通用应答帧（见 §2.2），CMD=<code>0x04</code>。</p>
+<pre><span class="hex-dump"><span class="hl-comment">开启变压器：</span>
+<span class="dir">请求：</span> AA 04 01 01 B0
+<span class="resp">应答：</span> AA 04 01 00 AF
+
+<span class="hl-comment">关闭变压器：</span>
+<span class="dir">请求：</span> AA 04 01 00 AF
+<span class="resp">应答：</span> AA 04 01 00 AF</span></pre>
+
+<hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);">
+
+<!-- 3.5 -->
+<h3>3.5 发射超声波</h3>
+<p><strong>用途：</strong>控制超声波发射的开启与关闭。模组按当前配置的频率（由 §3.1 / §3.2 / §3.3 设置）持续发射，直到主机下发关闭指令。发射时长完全由主机控制。</p>
+<p><strong>调用方 / 前置条件：</strong>开启发射前需先通过 §3.4 开启变压器。</p>
+<h4>请求</h4>
+<table class="proto-table">
+  <thead><tr><th>字段</th><th>值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>HEAD</code></td><td><code>0xAA</code></td><td></td></tr>
+    <tr><td><code>CMD</code></td><td><code>0x05</code></td><td></td></tr>
+    <tr><td><code>LEN</code></td><td><code>0x01</code></td><td>数据区长度为 1</td></tr>
+    <tr><td><code>DATA[0]</code></td><td><code>0x00</code> ~ <code>0x01</code></td><td><code>0x00</code> = 停止发射，<code>0x01</code> = 开始发射</td></tr>
+    <tr><td><code>CHECK</code></td><td>计算结果</td><td>整帧校验和</td></tr>
+  </tbody>
+</table>
+<p><strong>应答：</strong>通用应答帧（见 §2.2），CMD=<code>0x05</code>。</p>
+<pre><span class="hex-dump"><span class="hl-comment">开始发射：</span>
+<span class="dir">请求：</span> AA 05 01 01 B1
+<span class="resp">应答：</span> AA 05 01 00 B0
+
+<span class="hl-comment">停止发射：</span>
+<span class="dir">请求：</span> AA 05 01 00 B0
+<span class="resp">应答：</span> AA 05 01 00 B0</span></pre>
+</section>
+
+<!-- ===== 4. 典型使用流程 ===== -->
+<section class="section-card">
+<h2>4. 典型使用流程</h2>
+<div class="mermaid-box">
+<pre style="background: none; color: var(--text); font-family: monospace; text-align: left; font-size: .82rem; line-height: 1.6;">
+主机 (MCU)                    超声波模组
+    |                              |
+    |--- AA 01 00 AB  (配置25KHz)  --->|
+    |<-- AA 01 01 00 AC (成功)     ---|
+    |                              |
+    |--- AA 04 01 01 B0 (开启变压器) -->|
+    |<-- AA 04 01 00 AF (成功)     ---|
+    |                              |
+    |--- AA 05 01 01 B1 (开始发射) --->|
+    |<-- AA 05 01 00 B0 (成功)     ---|
+    |     ┌─ 主机控制发射时长 ─┐    |
+    |                              |
+    |--- AA 05 01 00 B0 (停止发射) --->|
+    |<-- AA 05 01 00 B0 (成功)     ---|
+    |                              |
+    |--- AA 04 01 00 AF (关闭变压器) -->|
+    |<-- AA 04 01 00 AF (成功)     ---|
+</pre>
+</div>
+</section>
+
+<!-- ===== 5. 完整指令速查表 ===== -->
+<section class="section-card">
+<h2>5. 完整指令速查表</h2>
+<table class="proto-table">
+  <thead>
+    <tr><th>功能</th><th>CMD</th><th>LEN</th><th>DATA</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>配置 25KHz</td><td><code>0x01</code></td><td><code>0x00</code></td><td>无</td><td>发射频率设为 25KHz</td></tr>
+    <tr><td>配置 30KHz</td><td><code>0x02</code></td><td><code>0x00</code></td><td>无</td><td>发射频率设为 30KHz</td></tr>
+    <tr><td>配置 25K+30K</td><td><code>0x03</code></td><td><code>0x00</code></td><td>无</td><td>发射频率设为 25KHz+30KHz</td></tr>
+    <tr><td>控制变压器</td><td><code>0x04</code></td><td><code>0x01</code></td><td><code>0x00</code>=关, <code>0x01</code>=开</td><td>开启/关闭变压器</td></tr>
+    <tr><td>发射超声波</td><td><code>0x05</code></td><td><code>0x01</code></td><td><code>0x00</code>=停止, <code>0x01</code>=发射</td><td>开始/停止超声波发射</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ===== 6. 错误处理 ===== -->
+<section class="section-card">
+<h2>6. 错误处理</h2>
+<table class="proto-table">
+  <thead>
+    <tr><th>异常场景</th><th>行为</th><th>应答 STATUS</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>帧头错误 (<code>HEAD != 0xAA</code>)</td><td>模组丢弃该帧，无应答</td><td>—</td></tr>
+    <tr><td>校验和不匹配</td><td>模组丢弃该帧，无应答</td><td>—</td></tr>
+    <tr><td>CMD 未定义</td><td>回复错误应答</td><td><span class="status-badge status-invalid">0x02 (无效命令)</span></td></tr>
+    <tr><td>数据区长度与 CMD 不匹配</td><td>回复错误应答</td><td><span class="status-badge status-fail">0x01 (失败)</span></td></tr>
+    <tr><td>发射指令(DATA=开)但变压器未开启</td><td>回复错误应答</td><td><span class="status-badge status-fail">0x01 (失败)</span></td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ===== 7. 附录 ===== -->
+<section class="section-card">
+<h2>7. 附录</h2>
+
+<h3>7.1 校验和计算参考 (C语言)</h3>
+<pre><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> </span><span style="color:#89b4fa;">calc_checksum</span><span style="color:#cdd6f4;">(</span><span style="color:#cba6f7;">const</span><span style="color:#cdd6f4;"> </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> *buf, </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> len)
+{
+    </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> sum = </span><span style="color:#fab387;">0</span><span style="color:#cdd6f4;">;
+    </span><span style="color:#89b4fa;">for</span><span style="color:#cdd6f4;"> (</span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> i = </span><span style="color:#fab387;">0</span><span style="color:#cdd6f4;">; i &lt; len; i++) {
+        sum += buf[i];
+    }
+    </span><span style="color:#89b4fa;">return</span><span style="color:#cdd6f4;"> sum;
+}</span></pre>
+
+<h3>7.2 组包参考 (C语言)</h3>
+<pre><span style="color:#cba6f7;">void</span><span style="color:#cdd6f4;"> </span><span style="color:#89b4fa;">build_request</span><span style="color:#cdd6f4;">(</span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> cmd, </span><span style="color:#cba6f7;">const</span><span style="color:#cdd6f4;"> </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> *data, </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> data_len, </span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> *frame)
+{
+    frame[</span><span style="color:#fab387;">0</span><span style="color:#cdd6f4;">] = </span><span style="color:#fab387;">0xAA</span><span style="color:#cdd6f4;">;        </span><span style="color:#6c7086;">// HEAD
+</span><span style="color:#cdd6f4;">    frame[</span><span style="color:#fab387;">1</span><span style="color:#cdd6f4;">] = cmd;         </span><span style="color:#6c7086;">// CMD
+</span><span style="color:#cdd6f4;">    frame[</span><span style="color:#fab387;">2</span><span style="color:#cdd6f4;">] = data_len;    </span><span style="color:#6c7086;">// LEN
+</span><span style="color:#cdd6f4;">    </span><span style="color:#89b4fa;">for</span><span style="color:#cdd6f4;"> (</span><span style="color:#cba6f7;">uint8_t</span><span style="color:#cdd6f4;"> i = </span><span style="color:#fab387;">0</span><span style="color:#cdd6f4;">; i &lt; data_len; i++) {
+        frame[</span><span style="color:#fab387;">3</span><span style="color:#cdd6f4;"> + i] = data[i];
+    }
+    frame[</span><span style="color:#fab387;">3</span><span style="color:#cdd6f4;"> + data_len] = </span><span style="color:#89b4fa;">calc_checksum</span><span style="color:#cdd6f4;">(frame, </span><span style="color:#fab387;">3</span><span style="color:#cdd6f4;"> + data_len);
+}</span></pre>
+</section>
+
+<footer style="text-align: center; padding: 24px 0 8px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); margin-top: 16px;">
+  UART 超声波模组通信协议 &mdash; 本文档与 Markdown 源文件保持一致
+</footer>
+
+</div>
+</body>
+</html>

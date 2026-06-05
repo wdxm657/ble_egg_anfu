@@ -383,7 +383,7 @@ static void app_ctrl_rsp_owner_rec_play_from_soc(u8 cmdId, u8 seq, const u8 *pay
         if (payload[0] == 0x05)
         {
             BLE_LOG_D("[SOC_RSP] OWNER_REC_PLAY no owner voice");
-            u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, 0};
+            u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, payload[0]};
             app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
             return;
         }

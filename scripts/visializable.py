@@ -68,10 +68,8 @@ STATUS_NAME = {
     0x03: "PARAM_ERROR",
     0x04: "INTERNAL_ERROR",
     0x05: "BUSY",
-    0x06: "STATE_CONFLICT",
-    0x07: "NO_OWNER_VOICE",
-    0x08: "STORAGE_ERROR",
-    0x09: "SOC_TIMEOUT",
+    0x06: "SOC_TIMEOUT",
+    0x07: "SOC_ERROR"
 }
 
 CTRL_RX_RAW_BYTES = bytes(
