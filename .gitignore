@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 docs/PROJECT_JOURNAL.md
-
-
+hardware/pcba/
+hardware/History
+hardware/*.htm*
