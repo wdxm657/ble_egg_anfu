@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 docs/PROJECT_JOURNAL.md
-hardware/pcba/
-hardware/History
-hardware/*.htm*
+hardware/*/Project Outputs*
+hardware/*/History
+hardware/*/*.zip
+hardware/*/*.PrjPCBStructure
