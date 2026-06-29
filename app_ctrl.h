@@ -57,6 +57,9 @@ enum
     CTRL_CMD_TEXT_CHUNK = 0x40,  // long text transfer in chunks
 
     // Factory reset: clear owner voice, comfort config, comfort records
+    CTRL_CMD_CALM_MUSIC_PLAY      = 0x26,  // start calming music playback on SOC
+    CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x27,  // stop calming music playback on SOC
+
     CTRL_CMD_FACTORY_RESET = 0x50,
 };
 

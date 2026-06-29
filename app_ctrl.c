@@ -150,6 +150,8 @@ typedef struct
 
 _attribute_data_retention_ static app_ctrl_record_req_ctx_t g_ctx_calm_record_get;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_record_delete;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_music_play;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_music_play_stop;
 
 static void app_ctrl_time_cache_update(void)
 {
@@ -184,7 +186,14 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
             g_ctrlState.workState = payload[2];
             // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
             g_ctrlState.ownerVoiceExist = payload[4];
-            g_ctrlState.volume          = payload[5];
+            // SOC STATUS RSP payload[5] 是 dB 值，映射回 0-100
+            {
+                s8 soc_db = (s8)payload[5];
+                if (soc_db < -60) soc_db = -60;
+                if (soc_db > 30)  soc_db = 30;
+                g_ctrlState.volume = (u8)(((s16)soc_db + 60) * 100 / 90);
+                if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
+            }
             g_ctrlState.calmMode        = payload[6];
             g_ctrlState.enabledMask     = payload[7];
             if (payloadLen >= 9)
@@ -286,8 +295,14 @@ static void app_ctrl_rsp_volume_set_from_soc(u8 cmdId, u8 seq, const u8 *payload
 
     if (payloadLen >= 2 && payload[0] == 0x00)
     {
-        g_ctrlState.volume = payload[1];
-        BLE_LOG_D("[SOC_RSP] VOLUME_SET vol=%d", g_ctrlState.volume);
+        // SOC dB (-60..30) → PC 0-100
+        s8 soc_db = (s8)payload[1];
+        if (soc_db < -60) soc_db = -60;
+        if (soc_db > 30)  soc_db = 30;
+        u8 pc_val = (u8)(((s16)soc_db + 60) * 100 / 90);
+        if (pc_val > 100) pc_val = 100;
+        g_ctrlState.volume = pc_val;
+        BLE_LOG_D("[SOC_RSP] VOLUME_SET dB=%d pc=%d", soc_db, g_ctrlState.volume);
         u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, ctx->bleSeq, rsp, sizeof(rsp));
     }
@@ -1017,7 +1032,7 @@ static int app_ctrl_handle_uid_get(u8 seq, u8 *payload, u16 len)
 
 static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
 {
-    if (len < 1 || payload[0] > 30)
+    if (len < 1 || payload[0] > 100)
     {
         u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, seq, rsp, sizeof(rsp));
@@ -1027,10 +1042,14 @@ static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
     {
         return -1;
     }
+    // PC 0-100 → SOC -60..30 dB
+    s8 soc_db = (s8)(-60 + ((s16)payload[0] * 90 / 100));
+    u8 soc_payload = (u8)soc_db;
+
     g_ctx_volume_set.bleSeq = seq;
     if (app_uart_send_cmd_with_cb(
             UART_SOC_VOLUME_SET,
-            payload,
+            &soc_payload,
             1,
             app_ctrl_rsp_volume_set_from_soc,
             &g_ctx_volume_set,
@@ -1054,8 +1073,13 @@ static void app_ctrl_rsp_volume_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
 
     if (payloadLen >= 2 && payload[0] == 0x00)
     {
-        g_ctrlState.volume = payload[5];
-        BLE_LOG_D("[SOC_RSP] VOLUME_GET vol=%d", g_ctrlState.volume);
+        // SOC STATUS RSP payload[5] 是 dB 值，映射回 0-100
+        s8 soc_db = (s8)payload[5];
+        if (soc_db < -60) soc_db = -60;
+        if (soc_db > 30)  soc_db = 30;
+        g_ctrlState.volume = (u8)(((s16)soc_db + 60) * 100 / 90);
+        if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
+        BLE_LOG_D("[SOC_RSP] VOLUME_GET dB=%d pc=%d", soc_db, g_ctrlState.volume);
         u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_GET, ctx->bleSeq, rsp, sizeof(rsp));
     }
@@ -1543,6 +1567,104 @@ static int app_ctrl_handle_factory_reset(u8 seq, u8 *payload, u16 len)
     return 0;
 }
 
+// ----------------------- calming music play/stop (forward to SOC) -----------------------
+static void app_ctrl_rsp_calm_music_play_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x00)
+    {
+        BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY OK");
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+    else
+    {
+        BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY failed soc_status=0x%02x", payloadLen ? payload[0] : 0xFF);
+        u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+}
+
+static int app_ctrl_handle_calm_music_play(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (!app_ctrl_check_soc_online(CTRL_CMD_CALM_MUSIC_PLAY, seq))
+    {
+        return -1;
+    }
+
+    g_ctx_calm_music_play.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(UART_SOC_CALM_MUSIC_PLAY,
+                                  0,
+                                  0,
+                                  app_ctrl_rsp_calm_music_play_from_soc,
+                                  &g_ctx_calm_music_play,
+                                  0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY, seq, rsp, sizeof(rsp));
+        return -2;
+    }
+    return 0;
+}
+
+static void app_ctrl_rsp_calm_music_play_stop_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY_STOP OK");
+    u8 rsp[1] = {CTRL_STATUS_OK};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static int app_ctrl_handle_calm_music_play_stop(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (!app_ctrl_check_soc_online(CTRL_CMD_CALM_MUSIC_PLAY_STOP, seq))
+    {
+        return -1;
+    }
+
+    g_ctx_calm_music_play_stop.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(UART_SOC_CALM_MUSIC_PLAY_STOP,
+                                  0,
+                                  0,
+                                  app_ctrl_rsp_calm_music_play_stop_from_soc,
+                                  &g_ctx_calm_music_play_stop,
+                                  0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP, seq, rsp, sizeof(rsp));
+        return -2;
+    }
+    return 0;
+}
+
 // ----------------------- public APIs -----------------------
 void app_ctrl_init(void)
 {
@@ -1656,6 +1778,14 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_OWNER_REC_INFO_GET:
         BLE_LOG_D("CTRL_CMD_OWNER_REC_INFO_GET");
         app_ctrl_handle_owner_rec_info_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_MUSIC_PLAY:
+        BLE_LOG_D("CTRL_CMD_CALM_MUSIC_PLAY");
+        app_ctrl_handle_calm_music_play(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_MUSIC_PLAY_STOP:
+        BLE_LOG_D("CTRL_CMD_CALM_MUSIC_PLAY_STOP");
+        app_ctrl_handle_calm_music_play_stop(seq, payload, payLen);
         break;
     case CTRL_CMD_CALM_MODE_SET:
         BLE_LOG_D("CTRL_CMD_CALM_MODE_SET");

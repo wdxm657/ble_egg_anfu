@@ -28,6 +28,8 @@ CTRL_CMD_OWNER_REC_DELETE = 0x23
 CTRL_CMD_OWNER_REC_INFO_GET = 0x24
 CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25
 CTRL_CMD_CALM_MODE_SET = 0x30
+CTRL_CMD_CALM_MUSIC_PLAY = 0x26
+CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x27
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
 CTRL_CMD_CALM_RECORD_GET = 0x33
@@ -51,6 +53,8 @@ CMD_NAME = {
     CTRL_CMD_OWNER_REC_PLAY_STOP: "OWNER_REC_PLAY_STOP",
     CTRL_CMD_CALM_MODE_SET: "CALM_MODE_SET",
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
+    CTRL_CMD_CALM_MUSIC_PLAY: "CALM_MUSIC_PLAY",
+    CTRL_CMD_CALM_MUSIC_PLAY_STOP: "CALM_MUSIC_PLAY_STOP",
     CTRL_CMD_CALM_RECORD_GET: "CALM_RECORD_GET",
     CTRL_CMD_CALM_RECORD_DELETE: "CALM_RECORD_DELETE",
     CTRL_CMD_TIME_SET: "TIME_SET",
@@ -478,6 +482,21 @@ class MainWindow(QtWidgets.QWidget):
             btn.clicked.connect(lambda _=False, c=cmd, t=txt: self._send(c, b"", t))
             b2.addWidget(btn, i // 2, i % 2)
         grid.addWidget(box_rec, 0, 1)
+
+        # 安抚音乐播放
+        box_music = QtWidgets.QGroupBox("安抚音乐")
+        bm = QtWidgets.QVBoxLayout(box_music)
+        btn_music_play = QtWidgets.QPushButton("开始播放安抚音乐")
+        btn_music_stop = QtWidgets.QPushButton("停止播放安抚音乐")
+        btn_music_play.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_MUSIC_PLAY, b"", "CALM_MUSIC_PLAY")
+        )
+        btn_music_stop.clicked.connect(
+            lambda: self._send(CTRL_CMD_CALM_MUSIC_PLAY_STOP, b"", "CALM_MUSIC_PLAY_STOP")
+        )
+        bm.addWidget(btn_music_play)
+        bm.addWidget(btn_music_stop)
+        grid.addWidget(box_music, 0, 2)
 
         # 安抚模式
         box_mode = QtWidgets.QGroupBox("安抚模式接口")
