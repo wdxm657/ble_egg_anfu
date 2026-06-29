@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 docs/PROJECT_JOURNAL.md
 hardware/*/Project Outputs*
+hardware/*/__Previews
 hardware/*/History
-hardware/*/*.zip
+hardware/**/*.zip
 hardware/*/*.PrjPCBStructure

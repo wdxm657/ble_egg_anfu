@@ -39,6 +39,7 @@
 #define MY_RF_POWER_INDEX         RF_POWER_P2p87dBm
 #define MY_DIRECT_ADV_TIME        10000000
 #define BLE_DEVICE_ADDRESS_TYPE   BLE_DEVICE_ADDRESS_PUBLIC
+u32 soc_switch_tick;
 u32 advertise_begin_tick;
 u32 g_time_tick_last = 0;
 #if (PM_DEEPSLEEP_ENABLE)
@@ -171,7 +172,6 @@ void task_connect(u8 e, u8 *p, int n)
 #endif
 #if (UI_LED_ENABLE)
     LOG_D("[APP][CONN] Connect request");
-    gpio_write(GPIO_LED_RED, LED_ON_LEVEL);
 #endif
 }
 /**
@@ -208,7 +208,6 @@ void task_terminate(u8 e, u8 *p, int n)  //*p is terminate reason
 #endif
 #if (UI_LED_ENABLE)
     LOG_D("[APP][TERMINATE] Terminate request");
-    gpio_write(GPIO_LED_RED, !LED_ON_LEVEL);  // light off
 #endif
     advertise_begin_tick = clock_time();
 }
@@ -577,6 +576,50 @@ _attribute_no_inline_ void user_init_normal(void)
     app_uart_init();
     app_ctrl_init();
 
+    // GPIO init — 根据 app_config.h 引脚定义（EVK=0, UI_LED_ENABLE=1）
+#if (UI_LED_ENABLE)
+#if !(EVK)
+    /* 输出引脚初始化 */
+    gpio_set_func(GPIO_SOC_SWITCH, PC0_FUNC);
+    gpio_set_output_en(GPIO_SOC_SWITCH, PC0_OUTPUT_ENABLE);
+    gpio_write(GPIO_SOC_SWITCH, !LED_ON_LEVEL);             // SOC开关默认关
+    soc_switch_tick = clock_time();
+
+    gpio_set_func(GPIO_LED_CHARGE_GREN, PC0_FUNC);
+    gpio_set_output_en(GPIO_LED_CHARGE_GREN, PC0_OUTPUT_ENABLE);
+    gpio_write(GPIO_LED_CHARGE_GREN, LED_ON_LEVEL);        // 充电绿灯默认灭
+
+    gpio_set_func(GPIO_LED_CHARGE_RED, PC1_FUNC);
+    gpio_set_output_en(GPIO_LED_CHARGE_RED, PC1_OUTPUT_ENABLE);
+    gpio_write(GPIO_LED_CHARGE_RED, LED_ON_LEVEL);          // 充电红灯默认灭
+
+    gpio_set_func(GPIO_CHARGE_EN, PB6_FUNC);
+    gpio_set_output_en(GPIO_CHARGE_EN, PB6_OUTPUT_ENABLE);
+    gpio_write(GPIO_CHARGE_EN, 1);                          // 充电使能默认开启
+
+    gpio_set_func(GPIO_NTC_AD_EN, PB5_FUNC);
+    gpio_set_output_en(GPIO_NTC_AD_EN, PB5_OUTPUT_ENABLE);
+    gpio_write(GPIO_NTC_AD_EN, 1);                          // NTC 检测默认开启
+
+    gpio_set_func(GPIO_ULTAR_EN, PB3_FUNC);
+    gpio_set_output_en(GPIO_ULTAR_EN, PB3_OUTPUT_ENABLE);
+    gpio_write(GPIO_ULTAR_EN, 0);                           // 超声波默认关闭
+
+    /* 输入引脚初始化 */
+    gpio_set_func(GPIO_CHARGE_STATE, PB7_FUNC);
+    gpio_set_input_en(GPIO_CHARGE_STATE, PB7_INPUT_ENABLE);
+    gpio_setup_up_down_resistor(GPIO_CHARGE_STATE, PM_PIN_PULLUP_10K);
+
+    gpio_set_func(GPIO_PA7, PA7_FUNC);                     // 按键（GPIO_KEY 被 PD0 重定义，此处显式使用 PA7）
+    gpio_set_input_en(GPIO_PA7, PA7_INPUT_ENABLE);
+    gpio_setup_up_down_resistor(GPIO_PA7, PM_PIN_PULLUP_10K);
+
+    gpio_set_func(GPIO_KEY, PD0_FUNC);                     // USB 插入检测（GPIO_KEY 实际指向 PD0）
+    gpio_set_input_en(GPIO_KEY, PD0_INPUT_ENABLE);
+    gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
+#endif
+#endif
+
     //////////////////////////// peripheral hardware Initialization  End //////////////////////////////////
     //////////////////////////// basic hardware Initialization  Begin //////////////////////////////////
     /* random number generator must be initiated before any BLE stack initialization.
@@ -896,6 +939,28 @@ void                           app_flash_protection_operation(u8 flash_op_evt, u
 #endif
 
 #define FUNC_ELAPSED_TEST 0
+
+#if (UI_LED_ENABLE)
+static u32 g_led_charge_tick = 0;
+
+/**
+ * @brief     充电指示灯红绿交替闪烁（每秒翻转一次）
+ * @param[in] none
+ * @return    none
+ */
+static void app_led_charge_indicate(void)
+{
+    static u8 g_led_charge_state = 0;
+    if (clock_time_exceed(g_led_charge_tick, 1000000))
+    {
+        g_led_charge_tick = clock_time();
+        g_led_charge_state = !g_led_charge_state;
+        gpio_write(GPIO_LED_CHARGE_RED,  g_led_charge_state);
+        gpio_write(GPIO_LED_CHARGE_GREN, !g_led_charge_state);
+    }
+}
+#endif
+
 /**
  * @brief     BLE main loop
  * @param[in]  none.
@@ -913,6 +978,11 @@ void main_loop(void)
     u32 elapsed  = end_time - start_time;
     LOG_D("blc_sdk_main_loop_elapsed: %d", elapsed);
 #endif
+
+    // 2秒后开启SOC
+    if (clock_time_exceed(soc_switch_tick, 200000))
+        gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);            
+
 
     app_uart_task();
     app_ctrl_time_task();
@@ -936,16 +1006,13 @@ void main_loop(void)
 #endif
 
 #if (UI_LED_ENABLE)
+    app_led_charge_indicate();  // 充电指示灯红绿交替闪烁
     if (g_app_power_on)
     {
         app_ui_led_task();
     }
     else
     {
-        gpio_write(GPIO_LED_BLUE, !LED_ON_LEVEL);
-        gpio_write(GPIO_LED_GREEN, !LED_ON_LEVEL);
-        gpio_write(GPIO_LED_WHITE, !LED_ON_LEVEL);
-        gpio_write(GPIO_LED_RED, !LED_ON_LEVEL);
     }
 #endif
 #if (UI_KEYBOARD_ENABLE)

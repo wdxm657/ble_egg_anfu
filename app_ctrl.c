@@ -68,6 +68,7 @@ static void app_ctrl_evt_heartbeat_from_soc(u8 cmdId, u8 seq, const u8 *payload,
     (void)payloadLen;
     (void)userData;
 
+    // BLE_LOG_D("soc heart beat");
     g_soc_online              = 1;
     g_soc_last_heartbeat_tick = clock_time();
 }

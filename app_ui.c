@@ -39,40 +39,9 @@ static u8  g_led_blink_on   = 0;
 static void app_ui_led_all_off(void)
 {
 #if (UI_LED_ENABLE)
-    gpio_write(GPIO_LED_BLUE, !LED_ON_LEVEL);
-    gpio_write(GPIO_LED_GREEN, !LED_ON_LEVEL);
-    // gpio_write(GPIO_LED_WHITE, !LED_ON_LEVEL);
-    gpio_write(GPIO_LED_RED, !LED_ON_LEVEL);
 #endif
 }
 
-static void app_ui_led_set_blue(u8 on)
-{
-#if (UI_LED_ENABLE)
-    gpio_write(GPIO_LED_BLUE, on ? LED_ON_LEVEL : !LED_ON_LEVEL);
-#endif
-}
-
-static void app_ui_led_set_green(u8 on)
-{
-#if (UI_LED_ENABLE)
-    gpio_write(GPIO_LED_GREEN, on ? LED_ON_LEVEL : !LED_ON_LEVEL);
-#endif
-}
-
-static void app_ui_led_set_red(u8 on)
-{
-#if (UI_LED_ENABLE)
-    gpio_write(GPIO_LED_RED, on ? LED_ON_LEVEL : !LED_ON_LEVEL);
-#endif
-}
-
-static void app_ui_led_set_white(u8 on)
-{
-#if (UI_LED_ENABLE)
-    gpio_write(GPIO_LED_WHITE, on ? LED_ON_LEVEL : !LED_ON_LEVEL);
-#endif
-}
 
 void app_ui_led_task(void)
 {

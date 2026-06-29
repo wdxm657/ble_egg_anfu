@@ -170,22 +170,47 @@ enum{
 	#define PA6_OUTPUT_ENABLE		1
 	#define	PA7_OUTPUT_ENABLE		1
 	#else
-	#define	GPIO_LED_BLUE  	GPIO_PA6
-	#define	GPIO_LED_GREEN	GPIO_PA5
-	#define	GPIO_LED_WHITE	GPIO_PA4 // 激光指示灯
-	#define	GPIO_LED_RED	GPIO_PA7
-	#define RADAR_SWITCH    GPIO_PB5
-	#define LED_ON_LEVEL 			1 		//gpio output high voltage to turn on led
-	#define PA4_FUNC				AS_GPIO
-	#define PA5_FUNC				AS_GPIO
-	#define PA6_FUNC				AS_GPIO
-	#define PA7_FUNC				AS_GPIO
+	#define	GPIO_SOC_SWITCH         GPIO_PD4  // 输出 SOC电源开关 默认高电平
+	#define PD4_FUNC				AS_GPIO
+	#define PD4_OUTPUT_ENABLE		1
+	#define	GPIO_LED_CHARGE_GREN  GPIO_PC0  // 输出 充电指示绿灯 默认高电平
+	#define PC0_FUNC				AS_GPIO
+	#define PC0_OUTPUT_ENABLE		1
+	#define	GPIO_LED_CHARGE_RED   GPIO_PC1  // 输出 充电指示红灯 默认高电平
+	#define PC1_FUNC          		AS_GPIO
+	#define	PC1_OUTPUT_ENABLE		1
+	#define	GPIO_CHARGE_EN   		GPIO_PB6  // 输出 充电使能 默认高电平
+	#define PB6_FUNC          		AS_GPIO
+	#define	PB6_OUTPUT_ENABLE		1
+	#define	GPIO_NTC_AD_EN		   GPIO_PB5  // 输出 电池温度NTC检测开关 默认高电平
 	#define PB5_FUNC          		AS_GPIO
-	#define	PA4_OUTPUT_ENABLE		1
-	#define	PA5_OUTPUT_ENABLE		1
-	#define PA6_OUTPUT_ENABLE		1
-	#define	PA7_OUTPUT_ENABLE		1
-	#define PB5_OUTPUT_ENABLE 1
+	#define	PB5_OUTPUT_ENABLE		1
+	#define	GPIO_ULTAR_EN		   GPIO_PB3  // 输出 超声波开关使能 默认低电平
+	#define PB3_FUNC          		AS_GPIO
+	#define	PB3_OUTPUT_ENABLE		1
+
+
+	#define	GPIO_NTC_ADC   GPIO_PB4  // ADC输入 电池NTC ADC输入
+	#define	GPIO_BAT_ADC   GPIO_PB2  // ADC输入 电池电压 ADC输入
+
+	#define	GPIO_ULTRA_URAT_TX   GPIO_PD7  // SOC串口
+	#define	GPIO_ULTRA_URAT_RX   GPIO_PD6  // SOC串口
+	#define	GPIO_SOC_URAT_TX   GPIO_PD1  // SOC串口
+	#define	GPIO_SOC_URAT_RX   GPIO_PD2  // SOC串口
+
+
+	#define	GPIO_CHARGE_STATE   GPIO_PB7  // 上拉输入 充电状态 高电平充电中 低电平充满电
+	#define PB7_FUNC          		AS_GPIO
+	#define	PB7_INPUT_ENABLE		1
+	#define	GPIO_KEY		    GPIO_PA7  // 上拉输入 按键 高电平松开 低电平按下
+	#define PA7_FUNC          		AS_GPIO
+	#define	PA7_INPUT_ENABLE		1
+	#define	GPIO_KEY		    GPIO_PD0  // 上拉输入 USB输入检测 高电平插入低电平拔出
+	#define PD0_FUNC          		AS_GPIO
+	#define	PD0_INPUT_ENABLE		1
+
+	#define LED_ON_LEVEL 			1 		//gpio output high voltage to turn on led
+
 	#endif
 #endif
 #if(UI_STEP_MOTOR_ENABLE)
