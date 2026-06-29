@@ -60,6 +60,15 @@ enum
     CTRL_CMD_CALM_MUSIC_PLAY      = 0x26,  // start calming music playback on SOC
     CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x27,  // stop calming music playback on SOC
 
+    CTRL_CMD_ULTRA_SET_25K   = 0x60,  // 设置超声波 25KHz
+    CTRL_CMD_ULTRA_SET_30K   = 0x61,  // 设置超声波 30KHz
+    CTRL_CMD_ULTRA_SET_DUAL  = 0x62,  // 设置超声波 25K+30K 混合
+    CTRL_CMD_ULTRA_TRANS_ON  = 0x63,  // 开启超声波变压器
+    CTRL_CMD_ULTRA_TRANS_OFF = 0x64,  // 关闭超声波变压器
+    CTRL_CMD_ULTRA_EMIT_ON   = 0x65,  // 开始发射超声波
+    CTRL_CMD_ULTRA_EMIT_OFF  = 0x66,  // 停止发射超声波
+    CTRL_CMD_ULTRA_POWER     = 0x67,  // 超声波模组供电 (payload[0]=0关 1开)
+
     CTRL_CMD_FACTORY_RESET = 0x50,
 };
 

@@ -107,10 +107,11 @@ enum{
 #define MODULE_WATCHDOG_ENABLE						0
 #define WATCHDOG_INIT_TIMEOUT						500  //Unit:ms
 /**
- *  @brief  software uart enable and setting
+ *  @brief  software uart enable and setting (用于超声波模组 TX)
  */
+#define 	SOFT_UART_ENABLE                        1
 #define 	SOFT_UART_BAUD_RATE                     9600
-#define 	SOFT_UART_TX_IO                   		GPIO_PD5
+#define 	SOFT_UART_TX_IO                   		GPIO_PD7
 #define 	SOFT_UART_RX_IO                   		GPIO_PD6
 #if (UI_KEYBOARD_ENABLE)   // if test pure power, kyeScan GPIO setting all disabled
 	//---------------  KeyMatrix PA0/PD4/PF0/PF1 -----------------------------
@@ -193,8 +194,8 @@ enum{
 	#define	GPIO_NTC_ADC   GPIO_PB4  // ADC输入 电池NTC ADC输入
 	#define	GPIO_BAT_ADC   GPIO_PB2  // ADC输入 电池电压 ADC输入
 
-	#define	GPIO_ULTRA_URAT_TX   GPIO_PD7  // SOC串口
-	#define	GPIO_ULTRA_URAT_RX   GPIO_PD6  // SOC串口
+	#define	GPIO_ULTRA_URAT_TX   GPIO_PD7  // ULTRA串口
+	#define	GPIO_ULTRA_URAT_RX   GPIO_PD6  // ULTRA串口
 	#define	GPIO_SOC_URAT_TX   GPIO_PD1  // SOC串口
 	#define	GPIO_SOC_URAT_RX   GPIO_PD2  // SOC串口
 

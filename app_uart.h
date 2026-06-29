@@ -93,4 +93,9 @@ int app_uart_send_cmd_with_cb(
  */
 void app_uart_register_evt_handler(u8 cmdId, app_uart_evt_cb_t evt_cb, void *userData);
 
+/**
+ * @brief     清空 SOC UART RX 缓冲区（共享 UART 切换引脚后调用）
+ */
+void app_uart_clear_rx_buf(void);
+
 #endif /* APP_UART_H */

@@ -16,6 +16,7 @@
 #include "app_att.h"
 #include "app_ctrl.h"
 #include "app_uart.h"
+#include "app_ultrasonic.h"
 
 #include "app.h"
 
@@ -1665,6 +1666,71 @@ static int app_ctrl_handle_calm_music_play_stop(u8 seq, u8 *payload, u16 len)
     return 0;
 }
 
+// ----------------------- ultrasonic module (direct MCU GPIO, not via SOC) -----------------------
+static int app_ctrl_handle_ultra_cmd(u8 cmdId, u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    (void)len;
+
+    int ret;
+    switch (cmdId)
+    {
+    case CTRL_CMD_ULTRA_SET_25K:
+        BLE_LOG_D("[ULTRA] SET_25K");
+        ret = app_ultrasonic_cmd_no_data(ULTRA_CMD_25K);
+        break;
+    case CTRL_CMD_ULTRA_SET_30K:
+        BLE_LOG_D("[ULTRA] SET_30K");
+        ret = app_ultrasonic_cmd_no_data(ULTRA_CMD_30K);
+        break;
+    case CTRL_CMD_ULTRA_SET_DUAL:
+        BLE_LOG_D("[ULTRA] SET_DUAL");
+        ret = app_ultrasonic_cmd_no_data(ULTRA_CMD_DUAL);
+        break;
+    case CTRL_CMD_ULTRA_TRANS_ON:
+        BLE_LOG_D("[ULTRA] TRANS_ON");
+        ret = app_ultrasonic_cmd_1byte(ULTRA_CMD_TRANS, 1);
+        break;
+    case CTRL_CMD_ULTRA_TRANS_OFF:
+        BLE_LOG_D("[ULTRA] TRANS_OFF");
+        ret = app_ultrasonic_cmd_1byte(ULTRA_CMD_TRANS, 0);
+        break;
+    case CTRL_CMD_ULTRA_EMIT_ON:
+        BLE_LOG_D("[ULTRA] EMIT_ON");
+        ret = app_ultrasonic_cmd_1byte(ULTRA_CMD_EMIT, 1);
+        break;
+    case CTRL_CMD_ULTRA_EMIT_OFF:
+        BLE_LOG_D("[ULTRA] EMIT_OFF");
+        ret = app_ultrasonic_cmd_1byte(ULTRA_CMD_EMIT, 0);
+        break;
+    case CTRL_CMD_ULTRA_POWER:
+        if (len >= 1) {
+            u8 on = payload[0] ? 1 : 0;
+            BLE_LOG_D("[ULTRA] POWER %s", on ? "ON" : "OFF");
+            app_ultrasonic_set_power(on);
+            ret = 0;
+        } else {
+            ret = -1;
+        }
+        break;
+    default:
+        ret = -1;
+        break;
+    }
+
+    if (ret == 0)
+    {
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, cmdId, seq, rsp, sizeof(rsp));
+    }
+    else
+    {
+        u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, cmdId, seq, rsp, sizeof(rsp));
+    }
+    return 0;
+}
+
 // ----------------------- public APIs -----------------------
 void app_ctrl_init(void)
 {
@@ -1810,6 +1876,16 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_CALM_RECORD_DELETE:
         BLE_LOG_D("CTRL_CMD_CALM_RECORD_DELETE");
         app_ctrl_handle_calm_record_delete(seq, payload, payLen);
+        break;
+    case CTRL_CMD_ULTRA_SET_25K:
+    case CTRL_CMD_ULTRA_SET_30K:
+    case CTRL_CMD_ULTRA_SET_DUAL:
+    case CTRL_CMD_ULTRA_TRANS_ON:
+    case CTRL_CMD_ULTRA_TRANS_OFF:
+    case CTRL_CMD_ULTRA_EMIT_ON:
+    case CTRL_CMD_ULTRA_EMIT_OFF:
+    case CTRL_CMD_ULTRA_POWER:
+        app_ctrl_handle_ultra_cmd(cmdId, seq, payload, payLen);
         break;
     case CTRL_CMD_FACTORY_RESET:
         BLE_LOG_D("CTRL_CMD_FACTORY_RESET");

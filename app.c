@@ -30,6 +30,7 @@
 #include "app_buffer.h"
 #include "app_uart.h"
 #include "app_ctrl.h"
+#include "app_ultrasonic.h"
 
 #define ADV_IDLE_ENTER_DEEP_TIME  60  // 60 s
 #define CONN_IDLE_ENTER_DEEP_TIME 60  // 60 s
@@ -582,7 +583,7 @@ _attribute_no_inline_ void user_init_normal(void)
     /* 输出引脚初始化 */
     gpio_set_func(GPIO_SOC_SWITCH, PC0_FUNC);
     gpio_set_output_en(GPIO_SOC_SWITCH, PC0_OUTPUT_ENABLE);
-    gpio_write(GPIO_SOC_SWITCH, !LED_ON_LEVEL);             // SOC开关默认关
+    gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);             // SOC开关默认关
     soc_switch_tick = clock_time();
 
     gpio_set_func(GPIO_LED_CHARGE_GREN, PC0_FUNC);
@@ -617,6 +618,8 @@ _attribute_no_inline_ void user_init_normal(void)
     gpio_set_func(GPIO_KEY, PD0_FUNC);                     // USB 插入检测（GPIO_KEY 实际指向 PD0）
     gpio_set_input_en(GPIO_KEY, PD0_INPUT_ENABLE);
     gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
+
+    app_ultrasonic_init();
 #endif
 #endif
 

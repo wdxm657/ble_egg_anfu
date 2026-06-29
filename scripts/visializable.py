@@ -37,6 +37,14 @@ CTRL_CMD_CALM_RECORD_DELETE = 0x3A
 CTRL_CMD_UID_GET = 0x34
 CTRL_CMD_CALM_STRATEGY_SET = 0x37
 CTRL_CMD_CALM_STRATEGY_GET = 0x38
+CTRL_CMD_ULTRA_SET_25K = 0x60
+CTRL_CMD_ULTRA_SET_30K = 0x61
+CTRL_CMD_ULTRA_SET_DUAL = 0x62
+CTRL_CMD_ULTRA_TRANS_ON = 0x63
+CTRL_CMD_ULTRA_TRANS_OFF = 0x64
+CTRL_CMD_ULTRA_EMIT_ON = 0x65
+CTRL_CMD_ULTRA_EMIT_OFF = 0x66
+CTRL_CMD_ULTRA_POWER = 0x67
 CTRL_CMD_FACTORY_RESET = 0x50
 CTRL_CMD_TEXT_CHUNK = 0x40
 
@@ -61,6 +69,14 @@ CMD_NAME = {
     CTRL_CMD_CALM_STRATEGY_SET: "CALM_STRATEGY_SET",
     CTRL_CMD_UID_GET: "UID_GET",
     CTRL_CMD_CALM_STRATEGY_GET: "CALM_STRATEGY_GET",
+    CTRL_CMD_ULTRA_SET_25K: "ULTRA_SET_25K",
+    CTRL_CMD_ULTRA_SET_30K: "ULTRA_SET_30K",
+    CTRL_CMD_ULTRA_SET_DUAL: "ULTRA_SET_DUAL",
+    CTRL_CMD_ULTRA_TRANS_ON: "ULTRA_TRANS_ON",
+    CTRL_CMD_ULTRA_TRANS_OFF: "ULTRA_TRANS_OFF",
+    CTRL_CMD_ULTRA_EMIT_ON: "ULTRA_EMIT_ON",
+    CTRL_CMD_ULTRA_EMIT_OFF: "ULTRA_EMIT_OFF",
+    CTRL_CMD_ULTRA_POWER: "ULTRA_POWER",
     CTRL_CMD_FACTORY_RESET: "FACTORY_RESET",
     CTRL_CMD_TEXT_CHUNK: "TEXT_CHUNK",
 }
@@ -497,6 +513,28 @@ class MainWindow(QtWidgets.QWidget):
         bm.addWidget(btn_music_play)
         bm.addWidget(btn_music_stop)
         grid.addWidget(box_music, 0, 2)
+
+        # 超声波模块控制
+        box_ultra = QtWidgets.QGroupBox("超声波模块")
+        bu = QtWidgets.QGridLayout(box_ultra)
+        ultra_btns = [
+            ("25KHz",     CTRL_CMD_ULTRA_SET_25K),
+            ("30KHz",     CTRL_CMD_ULTRA_SET_30K),
+            ("双频",      CTRL_CMD_ULTRA_SET_DUAL),
+            ("供电开",    CTRL_CMD_ULTRA_POWER, b"\x01"),
+            ("供电关",    CTRL_CMD_ULTRA_POWER, b"\x00"),
+            ("变压器开",  CTRL_CMD_ULTRA_TRANS_ON),
+            ("变压器关",  CTRL_CMD_ULTRA_TRANS_OFF),
+            ("发射",      CTRL_CMD_ULTRA_EMIT_ON),
+            ("停止",      CTRL_CMD_ULTRA_EMIT_OFF),
+        ]
+        for i, item in enumerate(ultra_btns):
+            txt, cmd = item[0], item[1]
+            pl = item[2] if len(item) > 2 else b""
+            btn = QtWidgets.QPushButton(txt)
+            btn.clicked.connect(lambda _=False, c=cmd, p=pl, t=txt: self._send(c, p, t))
+            bu.addWidget(btn, i // 3, i % 3)
+        grid.addWidget(box_ultra, 0, 3)
 
         # 安抚模式
         box_mode = QtWidgets.QGroupBox("安抚模式接口")
