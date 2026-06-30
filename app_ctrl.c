@@ -92,7 +92,7 @@ typedef struct
 } app_ctrl_state_t;
 
 static app_ctrl_state_t g_ctrlState = {
-    .powerState         = 1,
+    .powerState         = 0,
     .workState          = 1,
     .btLinked           = 1,
     .ownerVoiceExist    = 0,
@@ -133,6 +133,7 @@ _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_stop;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_play;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_delete;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_play_stop;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_owner_rec_save;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_factory_reset;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_time_set;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_mode_set;
@@ -201,7 +202,7 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
             {
                 g_ctrlState.usMask = payload[8];
             }
-            BLE_LOG_D("[SOC_RSP] STATUS_GET work=%d rec=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
+            BLE_LOG_D("[SOC_RSP] STATUS_GET  work=%d rec=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
                       payload[2],
                       payload[4],
                       payload[5],
@@ -787,6 +788,33 @@ static void app_ctrl_rsp_owner_rec_delete_from_soc(u8 cmdId, u8 seq, const u8 *p
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
+static void app_ctrl_rsp_owner_rec_save_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (payloadLen >= 1 && payload[0] == 0x00)
+    {
+        BLE_LOG_D("[SOC_RSP] OWNER_REC_SAVE OK");
+        g_ctrlState.ownerVoiceExist    = 1;
+        g_ctrlState.ownerVoiceDuration = (payloadLen >= 2) ? payload[1] : 0;
+        u8 rsp[2]                      = {CTRL_STATUS_OK, g_ctrlState.ownerVoiceDuration};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_SAVE, ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    BLE_LOG_D("[SOC_RSP] OWNER_REC_SAVE failed status=0x%02x", payloadLen ? payload[0] : 0xFF);
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, payloadLen ? payload[0] : 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_SAVE, ctx->bleSeq, rsp, sizeof(rsp));
+    }
+}
+
 // ----------------------- sending -----------------------
 int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
 {
@@ -1044,7 +1072,7 @@ static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
         return -1;
     }
     // PC 0-100 → SOC -60..30 dB
-    s8 soc_db = (s8)(-60 + ((s16)payload[0] * 90 / 100));
+    s8 soc_db = (s8)(-60 + ((s16)(payload[0] * 0.6 )* 90 / 100));
     u8 soc_payload = (u8)soc_db;
 
     g_ctx_volume_set.bleSeq = seq;
@@ -1256,6 +1284,34 @@ static int app_ctrl_handle_owner_rec_play_stop(u8 seq, u8 *payload, u16 len)
         u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY_STOP, seq, rsp, sizeof(rsp));
         return -2;
+    }
+    return 0;
+}
+
+static int app_ctrl_handle_owner_rec_save(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_SAVE, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (!app_ctrl_check_soc_online(CTRL_CMD_OWNER_REC_SAVE, seq))
+    {
+        return -1;
+    }
+    g_ctx_owner_rec_save.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(
+            UART_SOC_OWNER_REC_SAVE,
+            0,
+            0,
+            app_ctrl_rsp_owner_rec_save_from_soc,
+            &g_ctx_owner_rec_save,
+            0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_SAVE, seq, rsp, sizeof(rsp));
     }
     return 0;
 }
@@ -1840,6 +1896,10 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_OWNER_REC_PLAY_STOP:
         BLE_LOG_D("CTRL_CMD_OWNER_REC_PLAY_STOP");
         app_ctrl_handle_owner_rec_play_stop(seq, payload, payLen);
+        break;
+    case CTRL_CMD_OWNER_REC_SAVE:
+        BLE_LOG_D("CTRL_CMD_OWNER_REC_SAVE");
+        app_ctrl_handle_owner_rec_save(seq, payload, payLen);
         break;
     case CTRL_CMD_OWNER_REC_INFO_GET:
         BLE_LOG_D("CTRL_CMD_OWNER_REC_INFO_GET");

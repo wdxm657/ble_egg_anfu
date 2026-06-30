@@ -377,7 +377,47 @@
 
 ---
 
-#### 4.9 主人录音删除（OWNER_REC_DELETE，CMD = `0x23`）
+#### 4.9 主人录音保存（OWNER_REC_SAVE，CMD = `0x26`）
+
+**用途**：将已录制到 tmp 目录的音频文件移动到播放目录。如果 tmp 中无文件，返回 `NOT_FOUND`。
+
+**请求帧（APP → 设备），总长 6 字节**
+
+
+|       |         |                  |
+| ----- | ------- | ---------------- |
+| 字节  | 值/变量 | 注释             |
+| byte0 | `0x01`  | 协议版本         |
+| byte1 | `0x01`  | CMD              |
+| byte2 | `0x26`  | OWNER_REC_SAVE   |
+| byte3 | `seq`   | 序号             |
+| byte4 | `0x00`  | 负载长度 = 0     |
+| byte5 | `0x00`  | 长度高字节       |
+
+
+**响应帧成功（设备 → APP），总长 8 字节**
+
+
+|       |               |                                    |
+| ----- | ------------- | ---------------------------------- |
+| 字节  | 值/变量       | 注释                               |
+| byte0 | `0x01`        | 协议版本                           |
+| byte1 | `0x02`        | RSP                                |
+| byte2 | `0x26`        | OWNER_REC_SAVE                     |
+| byte3 | `seq`         | 与请求一致                         |
+| byte4 | `0x02`        | 负载长度 = 2                       |
+| byte5 | `0x00`        | 长度高字节                         |
+| byte6 | `status`      | `0x00`                             |
+| byte7 | `durationSec` | 音频时长（秒），与 OWNER_REC_STOP 一致 |
+
+
+**响应帧（tmp 无文件）**，总长 7 字节：`byte6=0x07`（SOC_ERROR），`byte7=0x05`（NOT_FOUND）。
+
+**响应帧（移动失败）**，总长 7 字节：`byte6=0x07`（SOC_ERROR），`byte7=0x06`（INTERNAL_ERROR）。
+
+---
+
+#### 4.10 主人录音删除（OWNER_REC_DELETE，CMD = `0x23`）
 
 **请求帧（APP → 设备），总长 6 字节**
 
@@ -412,7 +452,7 @@
 
 ---
 
-#### 4.10 主人录音信息（OWNER_REC_INFO_GET，CMD = `0x24`）
+#### 4.11 主人录音信息（OWNER_REC_INFO_GET，CMD = `0x24`）
 
 **请求帧（APP → 设备），总长 6 字节**
 

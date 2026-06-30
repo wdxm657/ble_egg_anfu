@@ -27,9 +27,10 @@ CTRL_CMD_OWNER_REC_PLAY = 0x22
 CTRL_CMD_OWNER_REC_DELETE = 0x23
 CTRL_CMD_OWNER_REC_INFO_GET = 0x24
 CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25
+CTRL_CMD_OWNER_REC_SAVE = 0x26
+CTRL_CMD_CALM_MUSIC_PLAY = 0x27
+CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x28
 CTRL_CMD_CALM_MODE_SET = 0x30
-CTRL_CMD_CALM_MUSIC_PLAY = 0x26
-CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x27
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
 CTRL_CMD_CALM_RECORD_GET = 0x33
@@ -59,6 +60,7 @@ CMD_NAME = {
     CTRL_CMD_OWNER_REC_DELETE: "OWNER_REC_DELETE",
     CTRL_CMD_OWNER_REC_INFO_GET: "OWNER_REC_INFO_GET",
     CTRL_CMD_OWNER_REC_PLAY_STOP: "OWNER_REC_PLAY_STOP",
+    CTRL_CMD_OWNER_REC_SAVE: "OWNER_REC_SAVE",
     CTRL_CMD_CALM_MODE_SET: "CALM_MODE_SET",
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
     CTRL_CMD_CALM_MUSIC_PLAY: "CALM_MUSIC_PLAY",
@@ -251,6 +253,8 @@ class BleController:
             return f"{base} pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
         if frame.cmd_id == CTRL_CMD_VOLUME_GET and len(frame.payload) >= 2:
             return f"{base} volume={frame.payload[1]}"
+        if frame.cmd_id == CTRL_CMD_OWNER_REC_SAVE and len(frame.payload) >= 2:
+            return f"{base} duration={frame.payload[1]}s"
         if frame.cmd_id == CTRL_CMD_OWNER_REC_INFO_GET and len(frame.payload) >= 3:
             return f"{base} exist={frame.payload[1]} duration={frame.payload[2]}s"
         if frame.cmd_id == CTRL_CMD_CALM_MODE_GET and len(frame.payload) >= 5:
@@ -492,6 +496,7 @@ class MainWindow(QtWidgets.QWidget):
             ("停止播放", CTRL_CMD_OWNER_REC_PLAY_STOP),
             ("删除录音", CTRL_CMD_OWNER_REC_DELETE),
             ("录音信息", CTRL_CMD_OWNER_REC_INFO_GET),
+            ("保存音频", CTRL_CMD_OWNER_REC_SAVE),
         ]
         for i, (txt, cmd) in enumerate(rec_btns):
             btn = QtWidgets.QPushButton(txt)

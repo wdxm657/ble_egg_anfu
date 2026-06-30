@@ -41,6 +41,9 @@ enum
     CTRL_CMD_OWNER_REC_DELETE    = 0x23,
     CTRL_CMD_OWNER_REC_INFO_GET  = 0x24,
     CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25,
+    CTRL_CMD_OWNER_REC_SAVE      = 0x26,  // 保存录音: 将 tmp 目录下的音频移到播放目录
+    CTRL_CMD_CALM_MUSIC_PLAY      = 0x27,  // start calming music playback on SOC
+    CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x28,  // stop calming music playback on SOC
 
     CTRL_CMD_CALM_MODE_SET     = 0x30,
     CTRL_CMD_CALM_MODE_GET     = 0x31,
@@ -57,8 +60,6 @@ enum
     CTRL_CMD_TEXT_CHUNK = 0x40,  // long text transfer in chunks
 
     // Factory reset: clear owner voice, comfort config, comfort records
-    CTRL_CMD_CALM_MUSIC_PLAY      = 0x26,  // start calming music playback on SOC
-    CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x27,  // stop calming music playback on SOC
 
     CTRL_CMD_ULTRA_SET_25K   = 0x60,  // 设置超声波 25KHz
     CTRL_CMD_ULTRA_SET_30K   = 0x61,  // 设置超声波 30KHz
