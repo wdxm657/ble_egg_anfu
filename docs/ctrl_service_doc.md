@@ -953,6 +953,36 @@ SOC 工作状态发生变化时主动推送。
 | byte7 | `reserved`  | 保留字段（当前固定为 `0x00`）                                       |
 
 
+#### 5.3 状态变更事件（STATUS_CHANGED，EVENT cmd = `0x13`）
+
+当设备运行时状态（电源/工作/录音/音量/模式/使能位等）发生任何变化时，设备主动推送完整状态快照。  
+payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg_type=0x03`。
+
+**事件帧，总长 15 字节**
+
+
+|        |                 |                                                                     |
+| ------ | --------------- | ------------------------------------------------------------------- |
+| 字节   | 值/变量         | 注释                                                                |
+| byte0  | `0x01`          | 协议版本                                                            |
+| byte1  | `0x03`          | EVENT                                                               |
+| byte2  | `0x13`          | CTRL_CMD_STATUS_GET（复用命令 ID，由 msg_type 区分）                |
+| byte3  | `seq`           | 事件序号                                                            |
+| byte4  | `0x09`          | 负载长度 = 9                                                        |
+| byte5  | `0x00`          | 长度高字节                                                          |
+| byte6  | `status`        | `0x00`                                                              |
+| byte7  | `powerState`    | 电源：`0x00`关机，`0x01`开机                                        |
+| byte8  | `workState`     | 工作状态：`0x00`OFF，`0x01`监测，`0x02`识别，`0x03`执行，`0x04`休息 |
+| byte9  | `btLinked`      | 蓝牙连接状态：当前会话固定 `0x01`                                   |
+| byte10 | `ownerVoiceExist` | 主人录音是否存在：`0x00`无，`0x01`有                              |
+| byte11 | `volume`        | 音量 `0`～`100` (百分比)                                            |
+| byte12 | `calmMode`      | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
+| byte13 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
+| byte14 | `usMask`        | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
+
+
+APP 应在收到此事件后刷新本地缓存的状态展示，无需再次调用 STATUS_GET。
+
 ---
 
 ### 6. APP 处理建议

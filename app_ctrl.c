@@ -122,6 +122,41 @@ typedef struct
     u8 bleSeq;
 } app_ctrl_ble_req_ctx_t;
 
+/* 上一次推送的状态快照 (9 字节，与 STATUS_GET 响应 payload 一致) */
+/* [0]=status always 0, [1]=powerState, [2]=workState, [3]=btLinked,
+   [4]=ownerVoiceExist, [5]=volume, [6]=calmMode, [7]=enabledMask, [8]=usMask */
+static u8 s_pushed_status[9] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+/**
+ * @brief 检查 g_ctrlState 是否有变化，有则推送 STATUS 事件给 APP。
+ *         payload 格式与 STATUS_GET RSP 一致 (9 字节)。
+ */
+static void app_ctrl_state_try_push_event(void)
+{
+    u8 cur[9];
+    cur[0] = CTRL_STATUS_OK;
+    cur[1] = g_ctrlState.powerState;
+    cur[2] = g_ctrlState.workState;
+    cur[3] = g_ctrlState.btLinked;
+    cur[4] = g_ctrlState.ownerVoiceExist;
+    cur[5] = g_ctrlState.volume;
+    cur[6] = g_ctrlState.calmMode;
+    cur[7] = g_ctrlState.enabledMask;
+    cur[8] = g_ctrlState.usMask;
+
+    if (memcmp(s_pushed_status, cur, sizeof(cur)) == 0)
+    {
+        return;  /* 无变化 */
+    }
+
+    memcpy(s_pushed_status, cur, sizeof(cur));
+    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_STATUS_GET, g_ctrlSeq++, cur, sizeof(cur));
+    BLE_LOG_D("[STATE_PUSH] power=%d work=%d bt=%d rec=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
+              cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7], cur[8]);
+}
+
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_power_ctrl;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_status_get;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_volume_get;
@@ -188,14 +223,9 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
             g_ctrlState.workState = payload[2];
             // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
             g_ctrlState.ownerVoiceExist = payload[4];
-            // SOC STATUS RSP payload[5] 是 dB 值，映射回 0-100
-            {
-                s8 soc_db = (s8)payload[5];
-                if (soc_db < -60) soc_db = -60;
-                if (soc_db > 30)  soc_db = 30;
-                g_ctrlState.volume = (u8)(((s16)soc_db + 60) * 100 / 90);
-                if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
-            }
+            // SOC 已返回 0-100，直接使用
+            g_ctrlState.volume = payload[5];
+            if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
             g_ctrlState.calmMode        = payload[6];
             g_ctrlState.enabledMask     = payload[7];
             if (payloadLen >= 9)
@@ -297,14 +327,10 @@ static void app_ctrl_rsp_volume_set_from_soc(u8 cmdId, u8 seq, const u8 *payload
 
     if (payloadLen >= 2 && payload[0] == 0x00)
     {
-        // SOC dB (-60..30) → PC 0-100
-        s8 soc_db = (s8)payload[1];
-        if (soc_db < -60) soc_db = -60;
-        if (soc_db > 30)  soc_db = 30;
-        u8 pc_val = (u8)(((s16)soc_db + 60) * 100 / 90);
-        if (pc_val > 100) pc_val = 100;
-        g_ctrlState.volume = pc_val;
-        BLE_LOG_D("[SOC_RSP] VOLUME_SET dB=%d pc=%d", soc_db, g_ctrlState.volume);
+        // SOC 已返回 0-100，直接使用
+        g_ctrlState.volume = payload[1];
+        if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
+        BLE_LOG_D("[SOC_RSP] VOLUME_SET pc=%d", g_ctrlState.volume);
         u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_SET, ctx->bleSeq, rsp, sizeof(rsp));
     }
@@ -473,22 +499,6 @@ static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payl
     BLE_LOG_D("[SOC_RSP] FACTORY_RESET failed soc_status=0x%02x", err);
     u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
-}
-
-static void app_ctrl_evt_work_state_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
-{
-    (void)cmdId;
-    (void)seq;
-    (void)userData;
-
-    if (payloadLen < 2)
-    {
-        return;
-    }
-
-    BLE_LOG_D("Work state evt from SOC: state=%d\n", payload[0]);
-    g_ctrlState.workState = payload[0];
-    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_WORK_STATE_CHANGED, g_ctrlSeq++, payload, 2);
 }
 
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
@@ -1071,14 +1081,11 @@ static int app_ctrl_handle_volume_set(u8 seq, u8 *payload, u16 len)
     {
         return -1;
     }
-    // PC 0-100 → SOC -60..30 dB
-    s8 soc_db = (s8)(-60 + ((s16)(payload[0] * 0.6 )* 90 / 100));
-    u8 soc_payload = (u8)soc_db;
-
+    // 直接传 0-100，SOC 侧做映射
     g_ctx_volume_set.bleSeq = seq;
     if (app_uart_send_cmd_with_cb(
             UART_SOC_VOLUME_SET,
-            &soc_payload,
+            payload,  /* payload[0] 已是 0-100 */
             1,
             app_ctrl_rsp_volume_set_from_soc,
             &g_ctx_volume_set,
@@ -1102,13 +1109,10 @@ static void app_ctrl_rsp_volume_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
 
     if (payloadLen >= 2 && payload[0] == 0x00)
     {
-        // SOC STATUS RSP payload[5] 是 dB 值，映射回 0-100
-        s8 soc_db = (s8)payload[5];
-        if (soc_db < -60) soc_db = -60;
-        if (soc_db > 30)  soc_db = 30;
-        g_ctrlState.volume = (u8)(((s16)soc_db + 60) * 100 / 90);
+        // SOC 已返回 0-100，直接使用
+        g_ctrlState.volume = payload[1];
         if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
-        BLE_LOG_D("[SOC_RSP] VOLUME_GET dB=%d pc=%d", soc_db, g_ctrlState.volume);
+        BLE_LOG_D("[SOC_RSP] VOLUME_GET pc=%d", g_ctrlState.volume);
         u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_VOLUME_GET, ctx->bleSeq, rsp, sizeof(rsp));
     }
@@ -1808,7 +1812,6 @@ void app_ctrl_init(void)
     g_timeCache.valid         = 0;
     g_soc_online              = 0;
     g_soc_last_heartbeat_tick = 0;
-    app_uart_register_evt_handler(UART_SOC_WORK_STATE_EVT, app_ctrl_evt_work_state_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_OWNER_REC_EVT, app_ctrl_evt_owner_rec_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_HEARTBEAT_EVT, app_ctrl_evt_heartbeat_from_soc, 0);
 }
@@ -1823,6 +1826,9 @@ void app_ctrl_time_task(void)
         BLE_LOG_D("SOC heartbeat timeout, mark SOC offline");
         g_soc_online = 0;
     }
+
+    // Poll state changes and push to APP via EVENT
+    app_ctrl_state_try_push_event();
 }
 
 void app_ctrl_onRx(u8 *data, u16 len)
