@@ -253,6 +253,10 @@ class BleController:
             return f"{base} pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
         if frame.cmd_id == CTRL_CMD_VOLUME_GET and len(frame.payload) >= 2:
             return f"{base} volume={frame.payload[1]}"
+        if frame.cmd_id == CTRL_CMD_OWNER_REC_PLAY and len(frame.payload) >= 1:
+            src_name = ["saved", "tmp"]
+            src = frame.payload[1] if len(frame.payload) >= 2 else 0
+            return f"{base} src={src}({src_name[src] if src < len(src_name) else '?'})"
         if frame.cmd_id == CTRL_CMD_OWNER_REC_SAVE and len(frame.payload) >= 2:
             return f"{base} duration={frame.payload[1]}s"
         if frame.cmd_id == CTRL_CMD_OWNER_REC_INFO_GET and len(frame.payload) >= 3:
@@ -655,6 +659,10 @@ class MainWindow(QtWidgets.QWidget):
             return arr
         except Exception:
             return None
+
+    def _send_owner_rec_play(self) -> None:
+        src = int(self.cmb_play_src.currentData())
+        self._send(CTRL_CMD_OWNER_REC_PLAY, bytes([src]), f"OWNER_REC_PLAY src={src}")
 
     def _send_mode_set(self) -> None:
         mode = int(self.cmb_mode.currentData())

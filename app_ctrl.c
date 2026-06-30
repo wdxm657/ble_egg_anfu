@@ -1234,9 +1234,10 @@ static int app_ctrl_handle_owner_rec_play(u8 seq, u8 *payload, u16 len)
                 app_ctrl_rsp_owner_rec_play_from_soc,
                 &g_ctx_owner_rec_play,
                 0) != 0)
-    {
-        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
-        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
+        {
+            u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
+        }
     }
     return 0;
 }
