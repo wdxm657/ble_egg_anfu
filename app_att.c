@@ -514,3 +514,23 @@ void	my_gatt_init (void)
 }
 
 
+void app_att_battery_update(u8 percent)
+{
+	if (percent > 100)
+	{
+		percent = 100;
+	}
+
+	if (my_batVal[0] == percent)
+	{
+		return;
+	}
+
+	my_batVal[0] = percent;
+
+	/* CCC bit0=Notify enabled */
+	if (BLS_CONN_HANDLE != 0xFFFF && (batteryValueInCCC[0] & 0x01))
+	{
+		blc_gatt_pushHandleValueNotify(BLS_CONN_HANDLE, BATT_LEVEL_INPUT_DP_H, my_batVal, sizeof(my_batVal));
+	}
+}

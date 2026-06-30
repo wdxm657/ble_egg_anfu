@@ -31,6 +31,9 @@
 #include "app_uart.h"
 #include "app_ctrl.h"
 #include "app_ultrasonic.h"
+#include "app_input.h"
+#include "app_adc_mon.h"
+#include "adc.h"
 
 #define ADV_IDLE_ENTER_DEEP_TIME  60  // 60 s
 #define CONN_IDLE_ENTER_DEEP_TIME 60  // 60 s
@@ -581,9 +584,9 @@ _attribute_no_inline_ void user_init_normal(void)
 #if (UI_LED_ENABLE)
 #if !(EVK)
     /* 输出引脚初始化 */
-    gpio_set_func(GPIO_SOC_SWITCH, PC0_FUNC);
-    gpio_set_output_en(GPIO_SOC_SWITCH, PC0_OUTPUT_ENABLE);
-    gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);             // SOC开关默认关
+    gpio_set_func(GPIO_SOC_SWITCH, PD4_FUNC);
+    gpio_set_output_en(GPIO_SOC_SWITCH, PD4_OUTPUT_ENABLE);
+    gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);
     soc_switch_tick = clock_time();
 
     gpio_set_func(GPIO_LED_CHARGE_GREN, PC0_FUNC);
@@ -602,24 +605,26 @@ _attribute_no_inline_ void user_init_normal(void)
     gpio_set_output_en(GPIO_NTC_AD_EN, PB5_OUTPUT_ENABLE);
     gpio_write(GPIO_NTC_AD_EN, 1);                          // NTC 检测默认开启
 
+    // gpio_set_func(GPIO_BAT_AD_EN, PBx_FUNC);
+    // gpio_set_output_en(GPIO_BAT_AD_EN, PBx_OUTPUT_ENABLE);
+    // gpio_write(GPIO_BAT_AD_EN, 1);                          // BAT 检测默认开启
+    
     gpio_set_func(GPIO_ULTAR_EN, PB3_FUNC);
     gpio_set_output_en(GPIO_ULTAR_EN, PB3_OUTPUT_ENABLE);
     gpio_write(GPIO_ULTAR_EN, 0);                           // 超声波默认关闭
 
     /* 输入引脚初始化 */
-    gpio_set_func(GPIO_CHARGE_STATE, PB7_FUNC);
+    gpio_set_func(GPIO_CHARGE_STATE, PB7_FUNC);           // 充电状态检测
     gpio_set_input_en(GPIO_CHARGE_STATE, PB7_INPUT_ENABLE);
     gpio_setup_up_down_resistor(GPIO_CHARGE_STATE, PM_PIN_PULLUP_10K);
 
-    gpio_set_func(GPIO_PA7, PA7_FUNC);                     // 按键（GPIO_KEY 被 PD0 重定义，此处显式使用 PA7）
-    gpio_set_input_en(GPIO_PA7, PA7_INPUT_ENABLE);
-    gpio_setup_up_down_resistor(GPIO_PA7, PM_PIN_PULLUP_10K);
+    gpio_set_func(USB_DET, PD0_FUNC);                     // USB插入检测
+    gpio_set_input_en(USB_DET, PD0_INPUT_ENABLE);
+    gpio_setup_up_down_resistor(USB_DET, PM_PIN_PULLUP_10K);
 
-    gpio_set_func(GPIO_KEY, PD0_FUNC);                     // USB 插入检测（GPIO_KEY 实际指向 PD0）
+    gpio_set_func(GPIO_KEY, PD0_FUNC);                     // 按键检测
     gpio_set_input_en(GPIO_KEY, PD0_INPUT_ENABLE);
     gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
-
-    app_ultrasonic_init();
 #endif
 #endif
 
@@ -813,6 +818,11 @@ _attribute_no_inline_ void user_init_normal(void)
     bls_app_registerEventCallback(BLT_EV_FLAG_GPIO_EARLY_WAKEUP, &proc_keyboard);
 #endif
     ////////////////////////////////////////////////////////////////////////////////////////////////
+
+    app_ultrasonic_init();
+    app_input_init();
+    app_adc_mon_init();
+
     /* Check if any Stack(Controller & Host) Initialization error after all BLE initialization done.
      * attention that code will stuck in "while(1)" if any error detected in initialization, user need find what error happens and then fix it */
     blc_app_checkControllerHostInitialization();
@@ -971,42 +981,13 @@ static void app_led_charge_indicate(void)
  */
 void main_loop(void)
 {
-#if FUNC_ELAPSED_TEST
-    u32 start_time = clock_time() >> 4;
-#endif
     ////////////////////////////////////// BLE entry /////////////////////////////////
     blc_sdk_main_loop();
-#if FUNC_ELAPSED_TEST
-    u32 end_time = clock_time() >> 4;
-    u32 elapsed  = end_time - start_time;
-    LOG_D("blc_sdk_main_loop_elapsed: %d", elapsed);
-#endif
-
-    // 2秒后开启SOC
-    if (clock_time_exceed(soc_switch_tick, 200000))
-        gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);            
-
 
     app_uart_task();
     app_ctrl_time_task();
-
-////////////////////////////////////// UI entry /////////////////////////////////
-///////////////////////////////////// Battery Check ////////////////////////////////
-#if (APP_BATT_CHECK_ENABLE)
-    /*The frequency of low battery detect is controlled by the variable lowBattDet_tick, which is executed every
-     500ms in the demo. Users can modify this time according to their needs.*/
-    if (battery_get_detect_enable() && clock_time_exceed(lowBattDet_tick, 500000))
-    {
-        lowBattDet_tick = clock_time();
-        user_battery_power_check(VBAT_ALARM_THRES_MV);
-    }
-#endif
-
-#if FUNC_ELAPSED_TEST
-    end_time = clock_time() >> 4;
-    elapsed  = end_time - start_time;
-    LOG_D("ParseAndReportRadarFrame_elapsed: %d", elapsed);
-#endif
+    app_input_poll();
+    app_adc_mon_poll();
 
 #if (UI_LED_ENABLE)
     app_led_charge_indicate();  // 充电指示灯红绿交替闪烁
@@ -1017,9 +998,6 @@ void main_loop(void)
     else
     {
     }
-#endif
-#if (UI_KEYBOARD_ENABLE)
-    proc_keyboard(0, 0, 0);
 #endif
     // ////////////////////////////////////// PM Process /////////////////////////////////
     blt_pm_proc();

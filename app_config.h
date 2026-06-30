@@ -39,6 +39,8 @@
 #define RADAR_INSTALL_HEIGHT_FLASH_ADDR               (USER_FLASH_START_ADDR + 0x1000)
 // Radar play records storage (one 4K sector)
 #define RADAR_PLAY_RECORD_FLASH_ADDR                  (USER_FLASH_START_ADDR + 0x2000)
+// Battery percent persistence (one 4K sector)
+#define BAT_PERCENT_FLASH_ADDR                        (USER_FLASH_START_ADDR + 0x3000)
 
 #define BLE_APP_SECURITY_ENABLE      				0
 #define	BLE_OTA_SERVER_ENABLE						0
@@ -51,7 +53,7 @@
 /* Power Management */
 #define BLE_APP_PM_ENABLE							0
 #define PM_DEEPSLEEP_ENABLE            				0 		//test connection power, should disable deepSleep
-#define PM_DEEPSLEEP_RETENTION_ENABLE               1
+#define PM_DEEPSLEEP_RETENTION_ENABLE               0
 /* scan setting */
 #define SCAN_ENABLE									0
 /* Flash Protection:
@@ -200,13 +202,13 @@ enum{
 	#define	GPIO_SOC_URAT_RX   GPIO_PD2  // SOC串口
 
 
-	#define	GPIO_CHARGE_STATE   GPIO_PB7  // 上拉输入 充电状态 高电平充电中 低电平充满电
+	#define	GPIO_CHARGE_STATE   GPIO_PB7  // 上拉输入 充电状态 低电平充电中 高电平充满电
 	#define PB7_FUNC          		AS_GPIO
 	#define	PB7_INPUT_ENABLE		1
 	#define	GPIO_KEY		    GPIO_PA7  // 上拉输入 按键 高电平松开 低电平按下
 	#define PA7_FUNC          		AS_GPIO
 	#define	PA7_INPUT_ENABLE		1
-	#define	GPIO_KEY		    GPIO_PD0  // 上拉输入 USB输入检测 高电平插入低电平拔出
+	#define	USB_DET		    	GPIO_PD0  // 上拉输入 USB输入检测 低电平插入高电平拔出
 	#define PD0_FUNC          		AS_GPIO
 	#define	PD0_INPUT_ENABLE		1
 
