@@ -1205,8 +1205,16 @@ static int app_ctrl_handle_owner_rec_stop(u8 seq, u8 *payload, u16 len)
 
 static int app_ctrl_handle_owner_rec_play(u8 seq, u8 *payload, u16 len)
 {
-    (void)payload;
-    if (len != 0)
+    u8 source;
+    if (len == 0)
+    {
+        source = 0;  /* 空 payload = 播放已保存音频 */
+    }
+    else if (len == 1 && payload[0] <= 1)
+    {
+        source = payload[0];
+    }
+    else
     {
         u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));
@@ -1217,13 +1225,15 @@ static int app_ctrl_handle_owner_rec_play(u8 seq, u8 *payload, u16 len)
         return -1;
     }
     g_ctx_owner_rec_play.bleSeq = seq;
-    if (app_uart_send_cmd_with_cb(
-            UART_SOC_OWNER_REC_PLAY,
-            0,
-            0,
-            app_ctrl_rsp_owner_rec_play_from_soc,
-            &g_ctx_owner_rec_play,
-            0) != 0)
+    {
+        u8 soc_payload = source;
+        if (app_uart_send_cmd_with_cb(
+                UART_SOC_OWNER_REC_PLAY,
+                &soc_payload,
+                1,
+                app_ctrl_rsp_owner_rec_play_from_soc,
+                &g_ctx_owner_rec_play,
+                0) != 0)
     {
         u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, seq, rsp, sizeof(rsp));

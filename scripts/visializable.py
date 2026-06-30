@@ -492,7 +492,6 @@ class MainWindow(QtWidgets.QWidget):
         rec_btns = [
             ("开始录制", CTRL_CMD_OWNER_REC_START),
             ("结束录制", CTRL_CMD_OWNER_REC_STOP),
-            ("试听播放", CTRL_CMD_OWNER_REC_PLAY),
             ("停止播放", CTRL_CMD_OWNER_REC_PLAY_STOP),
             ("删除录音", CTRL_CMD_OWNER_REC_DELETE),
             ("录音信息", CTRL_CMD_OWNER_REC_INFO_GET),
@@ -502,6 +501,16 @@ class MainWindow(QtWidgets.QWidget):
             btn = QtWidgets.QPushButton(txt)
             btn.clicked.connect(lambda _=False, c=cmd, t=txt: self._send(c, b"", t))
             b2.addWidget(btn, i // 2, i % 2)
+        # 播放区域（带源选择）
+        play_row = len(rec_btns) // 2 + (1 if len(rec_btns) % 2 else 0)
+        b2.addWidget(QtWidgets.QLabel("播放源:"), play_row, 0)
+        self.cmb_play_src = QtWidgets.QComboBox()
+        self.cmb_play_src.addItem("已保存音频", 0)
+        self.cmb_play_src.addItem("tmp 未保存", 1)
+        b2.addWidget(self.cmb_play_src, play_row, 1)
+        btn_play = QtWidgets.QPushButton("试听播放")
+        btn_play.clicked.connect(self._send_owner_rec_play)
+        b2.addWidget(btn_play, play_row, 2)
         grid.addWidget(box_rec, 0, 1)
 
         # 安抚音乐播放
