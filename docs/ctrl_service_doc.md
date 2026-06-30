@@ -155,7 +155,7 @@
 | byte8  | `workState`       | 工作状态：`0x00`OFF，`0x01`监测，`0x02`识别，`0x03`执行，`0x04`休息 |
 | byte9  | `btLinked`        | 兼容字段：当前连接下**固定为** `0x01`                               |
 | byte10 | `ownerVoiceExist` | 主人录音是否存在：`0x00`无，`0x01`有                                |
-| byte11 | `volume`          | 音量 `0`～`30`                                                      |
+| byte11 | `volume`          | 音量 `0`～`100` (百分比)                                             |
 | byte12 | `calmMode`        | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
 | byte13 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
 | byte14 | `usMask`          | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
@@ -177,7 +177,7 @@
 | byte3 | `seq`    | 序号               |
 | byte4 | `0x01`   | 负载长度 = 1       |
 | byte5 | `0x00`   | 长度高字节         |
-| byte6 | `volume` | 目标音量 `0`～`30` |
+| byte6 | `volume` | 目标音量 `0`～`100` (百分比) |
 
 
 **响应帧（设备 → APP），总长 8 字节**
@@ -193,7 +193,7 @@
 | byte4 | `0x02`          | 负载长度 = 2               |
 | byte5 | `0x00`          | 长度高字节                 |
 | byte6 | `status`        | 见 §3                      |
-| byte7 | `volumeApplied` | SOC 应用后的音量 `0`～`30` |
+| byte7 | `volumeApplied` | SOC 应用后的音量 `0`～`100` (百分比) |
 
 
 **失败（SOC 回包异常）**：总长 8 字节，`byte6=0x07`（SOC_ERROR），`byte7=SOC故障码`（见 §3.1）。
@@ -229,7 +229,7 @@
 | byte4 | `0x02`   | 负载长度 = 2       |
 | byte5 | `0x00`   | 长度高字节         |
 | byte6 | `status` | 见 §3              |
-| byte7 | `volume` | 当前音量 `0`～`30` |
+| byte7 | `volume` | 当前音量 `0`～`100` (百分比) |
 
 
 ---

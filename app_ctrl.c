@@ -81,7 +81,7 @@ typedef struct
     u8 btLinked;            // 兼容字段: 对当前连接会话固定返回 1（保留给旧版 APP）
     u8 ownerVoiceExist;     // 主人录音是否存在: 0=无, 1=有
     u8 ownerVoiceDuration;  // 主人录音时长(秒)
-    u8 volume;              // 音量值(当前约定 0~30)
+    u8 volume;              // 音量值(百分比 0~100)
     u8 calmMode;            // 安抚模式: 0=自动调整, 1=人工干预
     u8 enabledMask;         // 安抚措施使能位: bit0=音乐 bit1=主人录音 bit2=超声
     u8 usMask;              // 超声子措施使能位: bit0=25kHz bit1=30kHz bit2=25&30kHz
