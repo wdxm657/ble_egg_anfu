@@ -501,6 +501,108 @@ static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payl
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
+/**
+ * @brief  Callback: SOC work state event (0x80).
+ *         payload: [workState(1), reason(1)]
+ *         Forward to APP as BLE EVENT.
+ */
+static void app_ctrl_evt_work_state_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen >= 2)
+    {
+        g_ctrlState.workState = payload[0];
+        BLE_LOG_D("[SOC_EVT] WORK_STATE=%d reason=%d", payload[0], payload[1]);
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_WORK_STATE_CHANGED,
+                      g_ctrlSeq++, (u8 *)payload, payloadLen);
+    }
+}
+
+/**
+ * @brief  Callback: SOC session start event (0x81).
+ *         payload: [session_id(4LE), bark_ts(4LE)]
+ *         Forward to APP as BLE EVENT.
+ */
+static void app_ctrl_evt_session_start_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen >= 8)
+    {
+        u32 session_id = payload[0] | ((u32)payload[1] << 8) | ((u32)payload[2] << 16) | ((u32)payload[3] << 24);
+        u32 bark_ts    = payload[4] | ((u32)payload[5] << 8) | ((u32)payload[6] << 16) | ((u32)payload[7] << 24);
+        BLE_LOG_D("[SOC_EVT] SESSION_START id=%d bark_ts=%d", session_id, bark_ts);
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_SOC_SESSION_START,
+                      g_ctrlSeq++, (u8 *)payload, payloadLen);
+    }
+}
+
+/**
+ * @brief  Callback: SOC measure execution event (0x82).
+ *         payload: [session_id(4LE), step(1), measure(1), sub(1), ts(4LE)]
+ *         Forward to APP as BLE EVENT.
+ */
+static void app_ctrl_evt_measure_exec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen >= 11)
+    {
+        u32 session_id = payload[0] | ((u32)payload[1] << 8) | ((u32)payload[2] << 16) | ((u32)payload[3] << 24);
+        BLE_LOG_D("[SOC_EVT] MEASURE_EXEC id=%d step=%d measure=%d sub=%d",
+                  session_id, payload[4], payload[5], payload[6]);
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_SOC_MEASURE_EXEC,
+                      g_ctrlSeq++, (u8 *)payload, payloadLen);
+    }
+}
+
+/**
+ * @brief  Callback: SOC session result event (0x83).
+ *         payload: [session_id(4LE), result(1), end_ts(4LE), ok_measure(1), ok_sub(1)]
+ *         Forward to APP as BLE EVENT.
+ */
+static void app_ctrl_evt_session_result_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen >= 11)
+    {
+        u32 session_id = payload[0] | ((u32)payload[1] << 8) | ((u32)payload[2] << 16) | ((u32)payload[3] << 24);
+        BLE_LOG_D("[SOC_EVT] SESSION_RESULT id=%d result=%d ok_measure=%d ok_sub=%d",
+                  session_id, payload[4], payload[9], payload[10]);
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_SOC_SESSION_RESULT,
+                      g_ctrlSeq++, (u8 *)payload, payloadLen);
+    }
+}
+
+/**
+ * @brief  Callback: SOC error event (0x86).
+ *         payload: [errCode(1), ...]
+ *         Forward to APP as BLE EVENT.
+ */
+static void app_ctrl_evt_soc_error_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    BLE_LOG_D("[SOC_EVT] SOC_ERROR len=%d", payloadLen);
+    if (payloadLen >= 1)
+    {
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_SOC_ERROR,
+                      g_ctrlSeq++, (u8 *)payload, payloadLen);
+    }
+}
+
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
     (void)cmdId;
@@ -1820,8 +1922,13 @@ void app_ctrl_init(void)
     g_timeCache.valid         = 0;
     g_soc_online              = 0;
     g_soc_last_heartbeat_tick = 0;
-    app_uart_register_evt_handler(UART_SOC_OWNER_REC_EVT, app_ctrl_evt_owner_rec_from_soc, 0);
-    app_uart_register_evt_handler(UART_SOC_HEARTBEAT_EVT, app_ctrl_evt_heartbeat_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_WORK_STATE_EVT,     app_ctrl_evt_work_state_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_OWNER_REC_EVT,      app_ctrl_evt_owner_rec_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_HEARTBEAT_EVT,      app_ctrl_evt_heartbeat_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_BARK_DETECTED_EVT,  app_ctrl_evt_session_start_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_MEASURE_EXEC_EVT,   app_ctrl_evt_measure_exec_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_SESSION_RESULT_EVT, app_ctrl_evt_session_result_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_ERROR_EVT,          app_ctrl_evt_soc_error_from_soc, 0);
 }
 
 void app_ctrl_time_task(void)

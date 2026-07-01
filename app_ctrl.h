@@ -55,7 +55,12 @@ enum
     CTRL_CMD_TIME_SET = 0x32,  // set device time (YYYY-MM-DD HH:MM:SS)
     CTRL_CMD_UID_GET  = 0x34,  // get flash UID (16 bytes, split into 2 responses)
 
-    CTRL_CMD_WORK_STATE_CHANGED = 0x80,  // work state event (device -> APP)
+    CTRL_CMD_WORK_STATE_CHANGED     = 0x80,  // SOC work state event (device -> APP)
+    CTRL_CMD_SOC_SESSION_START      = 0x81,  // SOC 安抚会话开始事件
+    CTRL_CMD_SOC_MEASURE_EXEC       = 0x82,  // SOC 措施执行事件
+    CTRL_CMD_SOC_SESSION_RESULT     = 0x83,  // SOC 会话结果事件
+    CTRL_CMD_SOC_LOG_DATA           = 0x85,  // SOC 日志数据事件
+    CTRL_CMD_SOC_ERROR              = 0x86,  // SOC 错误通知事件
 
     CTRL_CMD_TEXT_CHUNK = 0x40,  // long text transfer in chunks
 

@@ -745,19 +745,21 @@
 
 #### 4.16 安抚策略查询（CALM_STRATEGY_GET，CMD = `0x38`）
 
-**请求帧（APP → 设备），总长 6 字节**
+**请求帧（APP → 设备），总长 7 字节**
+
+|       |         |                                                                  |
+| ----- | ------- | ---------------------------------------------------------------- |
+| 字节  | 值/变量 | 注释                                                             |
+| byte0 | `0x01`  | 协议版本                                                         |
+| byte1 | `0x01`  | CMD                                                              |
+| byte2 | `0x38`  | CALM_STRATEGY_GET                                                |
+| byte3 | `seq`   | 序号                                                             |
+| byte4 | `0x01`  | 负载长度 = 1                                                     |
+| byte5 | `0x00`  | 长度高字节                                                       |
+| byte6 | `mode`  | `0x00`=查询自动策略，`0x01`=查询手动策略                         |
 
 
-|       |         |                   |
-| ----- | ------- | ----------------- |
-| 字节  | 值/变量 | 注释              |
-| byte0 | `0x01`  | 协议版本          |
-| byte1 | `0x01`  | CMD               |
-| byte2 | `0x38`  | CALM_STRATEGY_GET |
-| byte3 | `seq`   | 序号              |
-| byte4 | `0x00`  | 负载长度 = 0      |
-| byte5 | `0x00`  | 长度高字节        |
-
+**注意**：SOC 端维护两个独立的策略文件（`calm_strategy_auto.bin` / `calm_strategy_manual.bin`），查询时需指定要获取哪个。设置策略（`CALM_STRATEGY_SET`）时自动根据 payload 中的 `mode` 字段保存到对应文件；模式切换（`CALM_MODE_SET`）时也会将当前策略持久化到对应文件。
 
 **响应帧（设备 → APP），变长**  
 令 `M = measureOrderCount`，`U = usOrderCount`，则 `payloadLen = 4 + M + U`（最大 `4+3+3=10`），总长 `6 + payloadLen`，不超过 20。
@@ -773,7 +775,7 @@
 | byte4                 | `payloadLen & 0xFF` | 见上式            |
 | byte5                 | `0x00`              | 长度高字节        |
 | byte6                 | `status`            | 见 §3             |
-| byte7                 | `mode`              | 安抚模式          |
+| byte7                 | `mode`              | 同请求中的 mode   |
 | byte8                 | `enabledMask`       | 同 §4.15          |
 | byte9                 | `measureOrderCount` | `M`               |
 | byte10 ～ `byte(9+M)` | `measureOrder[i]`   | 同 §4.15          |
@@ -935,7 +937,7 @@ SOC 端录音达上限（10 秒）自动停止时，设备以 EVENT 形式上报
 
 #### 5.2 工作状态变化事件（WORK_STATE_CHANGED，EVENT cmd = `0x80`）
 
-SOC 工作状态发生变化时主动推送。
+SOC 工作状态发生变化时主动推送。payload 直接透传 SOC 原始数据。
 
 **事件帧，总长 8 字节**
 
@@ -950,7 +952,107 @@ SOC 工作状态发生变化时主动推送。
 | byte4 | `0x02`      | 负载长度 = 2                                                        |
 | byte5 | `0x00`      | 长度高字节                                                          |
 | byte6 | `workState` | 工作状态：`0x00`OFF，`0x01`监测，`0x02`识别，`0x03`执行，`0x04`休息 |
-| byte7 | `reserved`  | 保留字段（当前固定为 `0x00`）                                       |
+| byte7 | `reason`    | 触发原因（见下表）                                                  |
+
+**reason 取值**
+
+
+| reason | 含义                        |
+| :----: | --------------------------- |
+| `0x00` | 开机                        |
+| `0x01` | 监测到狗叫，进入识别        |
+| `0x02` | 触发安抚，开始执行措施      |
+| `0x03` | 安抚成功，进入休息          |
+| `0x04` | 安抚失败，进入休息          |
+| `0x05` | 休息结束，回到监测          |
+| `0x06` | 措施完成，进入复听          |
+| `0x07` | 识别超时，回到监测          |
+| `0x08` | 复听期间检测到狗叫，再次识别 |
+
+
+#### 5.4 安抚会话开始事件（SOC_SESSION_START，EVENT cmd = `0x81`）
+
+SOC 端吠叫检测满 3 次触发安抚执行时主动推送。
+
+**事件帧，总长 14 字节**
+
+
+|            |              |                                    |
+| ---------- | ------------ | ---------------------------------- |
+| 字节       | 值/变量      | 注释                               |
+| byte0      | `0x01`       | 协议版本                           |
+| byte1      | `0x03`       | EVENT                              |
+| byte2      | `0x81`       | CTRL_CMD_SOC_SESSION_START         |
+| byte3      | `seq`        | 事件序号                           |
+| byte4      | `0x08`       | 负载长度 = 8                       |
+| byte5      | `0x00`       | 长度高字节                         |
+| byte6～9   | `session_id` | 会话 ID，uint32 LE                 |
+| byte10～13 | `bark_ts`    | 首次狗叫 Unix 时间戳（秒），uint32 LE |
+
+
+#### 5.5 措施执行事件（SOC_MEASURE_EXEC，EVENT cmd = `0x82`）
+
+SOC 每项安抚措施开始执行时主动推送。
+
+**事件帧，总长 17 字节**
+
+
+|               |              |                                      |
+| ------------- | ------------ | ------------------------------------ |
+| 字节          | 值/变量      | 注释                                 |
+| byte0         | `0x01`       | 协议版本                             |
+| byte1         | `0x03`       | EVENT                                |
+| byte2         | `0x82`       | CTRL_CMD_SOC_MEASURE_EXEC            |
+| byte3         | `seq`        | 事件序号                             |
+| byte4         | `0x0B`       | 负载长度 = 11                        |
+| byte5         | `0x00`       | 长度高字节                           |
+| byte6～9      | `session_id` | 会话 ID，uint32 LE                   |
+| byte10        | `step`       | 本项措施在列表中的序号（0 起）        |
+| byte11        | `measure`    | 措施类型：`1`=音乐，`2`=主人录音，`3`=超声 |
+| byte12        | `sub`        | 超声子项，仅 `measure=3` 时有效：`1`=25KHz，`2`=30KHz，`3`=双频 |
+| byte13～16    | `ts`         | 执行时间 Unix 时间戳（秒），uint32 LE |
+
+
+#### 5.6 会话结果事件（SOC_SESSION_RESULT，EVENT cmd = `0x83`）
+
+安抚会话结束（成功/失败）时主动推送。
+
+**事件帧，总长 17 字节**
+
+
+|               |              |                                      |
+| ------------- | ------------ | ------------------------------------ |
+| 字节          | 值/变量      | 注释                                 |
+| byte0         | `0x01`       | 协议版本                             |
+| byte1         | `0x03`       | EVENT                                |
+| byte2         | `0x83`       | CTRL_CMD_SOC_SESSION_RESULT          |
+| byte3         | `seq`        | 事件序号                             |
+| byte4         | `0x0B`       | 负载长度 = 11                        |
+| byte5         | `0x00`       | 长度高字节                           |
+| byte6～9      | `session_id` | 会话 ID，uint32 LE                   |
+| byte10        | `result`     | `0x00`=失败，`0x01`=成功             |
+| byte11～14    | `end_ts`     | 结束时间 Unix 时间戳（秒），uint32 LE |
+| byte15        | `ok_measure` | 最后生效的措施类型（同 `measure`）   |
+| byte16        | `ok_sub`     | 最后生效的超声子项（同 `sub`）       |
+
+
+#### 5.7 SOC 错误事件（SOC_ERROR，EVENT cmd = `0x86`）
+
+SOC 端发生内部错误时主动推送。
+
+**事件帧，总长 7 字节**
+
+
+|       |          |                        |
+| ----- | -------- | ---------------------- |
+| 字节  | 值/变量  | 注释                   |
+| byte0 | `0x01`   | 协议版本               |
+| byte1 | `0x03`   | EVENT                  |
+| byte2 | `0x86`   | CTRL_CMD_SOC_ERROR     |
+| byte3 | `seq`    | 事件序号               |
+| byte4 | `0x01`   | 负载长度 = 1           |
+| byte5 | `0x00`   | 长度高字节             |
+| byte6 | `errCode` | SOC 错误码（见 SOC 侧定义） |
 
 
 #### 5.3 状态变更事件（STATUS_CHANGED，EVENT cmd = `0x13`）

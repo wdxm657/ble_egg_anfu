@@ -38,6 +38,11 @@ CTRL_CMD_CALM_RECORD_DELETE = 0x3A
 CTRL_CMD_UID_GET = 0x34
 CTRL_CMD_CALM_STRATEGY_SET = 0x37
 CTRL_CMD_CALM_STRATEGY_GET = 0x38
+CTRL_CMD_WORK_STATE_CHANGED = 0x80
+CTRL_CMD_SOC_SESSION_START = 0x81
+CTRL_CMD_SOC_MEASURE_EXEC = 0x82
+CTRL_CMD_SOC_SESSION_RESULT = 0x83
+CTRL_CMD_SOC_ERROR = 0x86
 CTRL_CMD_ULTRA_SET_25K = 0x60
 CTRL_CMD_ULTRA_SET_30K = 0x61
 CTRL_CMD_ULTRA_SET_DUAL = 0x62
@@ -71,6 +76,11 @@ CMD_NAME = {
     CTRL_CMD_CALM_STRATEGY_SET: "CALM_STRATEGY_SET",
     CTRL_CMD_UID_GET: "UID_GET",
     CTRL_CMD_CALM_STRATEGY_GET: "CALM_STRATEGY_GET",
+    CTRL_CMD_WORK_STATE_CHANGED: "WORK_STATE_CHANGED",
+    CTRL_CMD_SOC_SESSION_START: "SOC_SESSION_START",
+    CTRL_CMD_SOC_MEASURE_EXEC: "SOC_MEASURE_EXEC",
+    CTRL_CMD_SOC_SESSION_RESULT: "SOC_SESSION_RESULT",
+    CTRL_CMD_SOC_ERROR: "SOC_ERROR",
     CTRL_CMD_ULTRA_SET_25K: "ULTRA_SET_25K",
     CTRL_CMD_ULTRA_SET_30K: "ULTRA_SET_30K",
     CTRL_CMD_ULTRA_SET_DUAL: "ULTRA_SET_DUAL",
@@ -244,10 +254,26 @@ class BleController:
     def _run_loop(self) -> None:
         asyncio.run(self._worker())
 
+    SOC_EVENT_CMDS = {
+        CTRL_CMD_WORK_STATE_CHANGED,
+        CTRL_CMD_SOC_SESSION_START,
+        CTRL_CMD_SOC_MEASURE_EXEC,
+        CTRL_CMD_SOC_SESSION_RESULT,
+        CTRL_CMD_SOC_ERROR,
+    }
+
     def _decode_rsp(self, frame: CtrlFrame) -> str:
+        prefix = "[EVENT]" if frame.cmd_id in self.SOC_EVENT_CMDS else "[RSP]"
+        name = CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))
+        base = f"{prefix} {name}"
+
+        # SOC events: payload 首字节不是 status，不显示 status 字段
+        if frame.cmd_id in self.SOC_EVENT_CMDS and frame.payload:
+            return self._decode_soc_event(frame, base)
+
         status = frame.payload[0] if frame.payload else 0xFF
         status_name = STATUS_NAME.get(status, "UNKNOWN")
-        base = f"[RSP] {CMD_NAME.get(frame.cmd_id, hex(frame.cmd_id))} status=0x{status:02X}({status_name})"
+        base = f"{base} status=0x{status:02X}({status_name})"
         if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
             _, pwr, ws, bt, rec, vol, mode, em, um = frame.payload[:9]
             return f"{base} pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
@@ -337,7 +363,49 @@ class BleController:
             return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_UID_GET and len(frame.payload) >= 2:
             return f"{base} payload={frame.payload.hex()}"
+
+        if frame.cmd_id == CTRL_CMD_SOC_ERROR and len(frame.payload) >= 1:
+            return f"{base} errCode=0x{frame.payload[0]:02x}"
+
         return f"{base} payload={frame.payload.hex()}"
+
+    def _decode_soc_event(self, frame: CtrlFrame, base: str) -> str:
+        p = frame.payload
+        if frame.cmd_id == CTRL_CMD_WORK_STATE_CHANGED and len(p) >= 2:
+            ws = p[0]
+            reason = p[1]
+            ws_name = MainWindow.WORK_STATE_NAMES.get(ws, f"未知({ws})")
+            reason_name = MainWindow.WORK_REASON_NAMES.get(reason, f"未知({reason})")
+            return f"{base} workState={ws}({ws_name}) reason={reason}({reason_name})"
+
+        if frame.cmd_id == CTRL_CMD_SOC_SESSION_START and len(p) >= 8:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            ts_val = int.from_bytes(p[4:8], "little", signed=False)
+            return f"{base} session_id={sid} bark_ts={ts_val}"
+
+        if frame.cmd_id == CTRL_CMD_SOC_MEASURE_EXEC and len(p) >= 11:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            step = p[4]
+            measure = p[5]
+            sub = p[6]
+            ts_val = int.from_bytes(p[7:11], "little", signed=False)
+            m_name = MainWindow.MEASURE_NAMES.get(measure, f"未知({measure})")
+            if measure == 3:
+                sub_name = MainWindow.US_SUB_NAMES.get(sub, f"未知({sub})")
+                m_name += f"({sub_name})"
+            return f"{base} session_id={sid} step={step} measure={measure}({m_name}) ts={ts_val}"
+
+        if frame.cmd_id == CTRL_CMD_SOC_SESSION_RESULT and len(p) >= 11:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            result = p[4]
+            ts_val = int.from_bytes(p[5:9], "little", signed=False)
+            ok_measure = p[9]
+            ok_sub = p[10]
+            result_str = "成功" if result == 1 else "失败"
+            m_name = MainWindow.MEASURE_NAMES.get(ok_measure, f"未知({ok_measure})")
+            return f"{base} session_id={sid} result={result}({result_str}) ok_measure={ok_measure}({m_name}) ts={ts_val}"
+
+        return f"{base} payload={p.hex()}"
 
     def _handle_notify(self, raw: bytes) -> None:
         frame = parse_ctrl_frame(raw)
@@ -370,7 +438,8 @@ class BleController:
                         self._log(f"[EVENT][TEXT] {text}")
                     self._chunk_sessions.pop(transfer_id, None)
             return
-        if frame.msg_type == CTRL_MSG_TYPE_RSP:
+        # RSP 和 EVENT（除 TEXT_CHUNK 外）都放入 rsp_frames 队列供 UI 更新
+        if frame.msg_type == CTRL_MSG_TYPE_RSP or frame.msg_type == CTRL_MSG_TYPE_EVENT:
             self.rsp_frames.put(frame)
             self._log(self._decode_rsp(frame))
             return
@@ -439,6 +508,7 @@ class MainWindow(QtWidgets.QWidget):
         self.resize(1200, 760)
         self._setup_ui(default_addr)
         self._setup_timer()
+        self._init_soothe_display()
 
     def _setup_ui(self, default_addr: str) -> None:
         root = QtWidgets.QVBoxLayout(self)
@@ -570,19 +640,46 @@ class MainWindow(QtWidgets.QWidget):
         b3.addWidget(self.cmb_mode, 0, 1)
         b3.addWidget(btn_mode_set, 1, 0)
         b3.addWidget(btn_mode_get, 1, 1)
-        btn_record_get = QtWidgets.QPushButton("安抚记录获取")
-        btn_record_get.clicked.connect(
-            lambda: self._send(CTRL_CMD_CALM_RECORD_GET, b"", "CALM_RECORD_GET")
-        )
-        btn_record_del = QtWidgets.QPushButton("安抚记录删除")
-        btn_record_del.clicked.connect(
-            lambda: self._send(CTRL_CMD_CALM_RECORD_DELETE, b"", "CALM_RECORD_DELETE")
-        )
-        b3.addWidget(btn_record_get, 2, 0)
-        b3.addWidget(btn_record_del, 2, 1)
         self.lbl_mode_query = QtWidgets.QLabel("模式查询结果：-")
-        b3.addWidget(self.lbl_mode_query, 3, 0, 1, 2)
+        b3.addWidget(self.lbl_mode_query, 2, 0, 1, 2)
         grid.addWidget(box_mode, 1, 0)
+
+        # 安抚过程实时显示
+        box_soothe = QtWidgets.QGroupBox("安抚过程实时显示")
+        bs = QtWidgets.QVBoxLayout(box_soothe)
+        self.lbl_soothe_state = QtWidgets.QLabel("状态：等待中")
+        self.lbl_soothe_session = QtWidgets.QLabel("会话：-")
+        self.lbl_soothe_measure = QtWidgets.QLabel("当前措施：-")
+        self.lbl_soothe_result = QtWidgets.QLabel("结果：-")
+        self.lbl_soothe_state.setWordWrap(True)
+        self.lbl_soothe_session.setWordWrap(True)
+        self.lbl_soothe_measure.setWordWrap(True)
+        self.lbl_soothe_result.setWordWrap(True)
+        bs.addWidget(self.lbl_soothe_state)
+        bs.addWidget(self.lbl_soothe_session)
+        bs.addWidget(self.lbl_soothe_measure)
+        bs.addWidget(self.lbl_soothe_result)
+        grid.addWidget(box_soothe, 0, 4)
+
+        # 安抚记录操作
+        box_record = QtWidgets.QGroupBox("安抚记录操作")
+        br = QtWidgets.QGridLayout(box_record)
+        self.btn_record_get = QtWidgets.QPushButton("获取安抚记录")
+        self.btn_record_del = QtWidgets.QPushButton("删除当前记录")
+        self.btn_record_get.clicked.connect(self._send_record_get)
+        self.btn_record_del.clicked.connect(self._send_record_del)
+        self.lbl_record_info = QtWidgets.QLabel("记录信息：-")
+        self.lbl_record_info.setWordWrap(True)
+        self.txt_record_detail = QtWidgets.QTextEdit()
+        self.txt_record_detail.setReadOnly(True)
+        self.txt_record_detail.setMaximumHeight(120)
+        br.addWidget(self.btn_record_get, 0, 0)
+        br.addWidget(self.btn_record_del, 0, 1)
+        br.addWidget(self.lbl_record_info, 1, 0, 1, 2)
+        br.addWidget(self.txt_record_detail, 2, 0, 1, 2)
+        grid.addWidget(box_record, 1, 2)
+
+        self._init_record_state()
 
         # 安抚策略
         box_strategy = QtWidgets.QGroupBox("安抚策略接口")
@@ -731,6 +828,24 @@ class MainWindow(QtWidgets.QWidget):
     def _apply_rsp_to_ui(self, frame: CtrlFrame) -> None:
         if not frame.payload:
             return
+
+        # SOC 事件：payload 首字节不是 status，直接处理
+        if frame.cmd_id in (
+            CTRL_CMD_WORK_STATE_CHANGED,
+            CTRL_CMD_SOC_SESSION_START,
+            CTRL_CMD_SOC_MEASURE_EXEC,
+            CTRL_CMD_SOC_SESSION_RESULT,
+        ):
+            if frame.cmd_id == CTRL_CMD_WORK_STATE_CHANGED:
+                self._apply_soothe_work_state(frame)
+            elif frame.cmd_id == CTRL_CMD_SOC_SESSION_START:
+                self._apply_soothe_session_start(frame)
+            elif frame.cmd_id == CTRL_CMD_SOC_MEASURE_EXEC:
+                self._apply_soothe_measure_exec(frame)
+            elif frame.cmd_id == CTRL_CMD_SOC_SESSION_RESULT:
+                self._apply_soothe_session_result(frame)
+            return
+
         status = frame.payload[0]
         if status != 0x00:
             return
@@ -792,6 +907,128 @@ class MainWindow(QtWidgets.QWidget):
                 f"measureOrder={measure_order}{measure_names} "
                 f"usOrder={us_order}{us_names}"
             )
+            return
+
+        if frame.cmd_id == CTRL_CMD_CALM_RECORD_GET:
+            self._apply_record_rsp(frame)
+            return
+
+        if frame.cmd_id == CTRL_CMD_CALM_RECORD_DELETE:
+            self._apply_record_del_rsp(frame)
+            return
+
+    def _init_soothe_display(self) -> None:
+        self._soothe_session_id = 0
+        self._soothe_measure_idx = 0
+        self._soothe_result_pending = False
+
+    WORK_STATE_NAMES = {
+        0: "OFF",
+        1: "监测中",
+        2: "识别中",
+        3: "执行中",
+        4: "休息中",
+    }
+
+    WORK_REASON_NAMES = {
+        0: "power_on",
+        1: "bark_detected",
+        2: "acting",
+        3: "success_rest",
+        4: "fail_rest",
+        5: "rest_done",
+        6: "post_measure",
+        7: "identify_timeout",
+        8: "post_measure_bark",
+    }
+
+    MEASURE_NAMES = {
+        1: "音乐",
+        2: "主人录音",
+        3: "超声",
+    }
+
+    US_SUB_NAMES = {
+        1: "25KHz",
+        2: "30KHz",
+        3: "双频",
+    }
+
+    def _apply_soothe_work_state(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) >= 2:
+            ws = p[0]
+            reason = p[1]
+            ws_name = self.WORK_STATE_NAMES.get(ws, f"未知({ws})")
+            reason_name = self.WORK_REASON_NAMES.get(reason, f"未知({reason})")
+            self.lbl_soothe_state.setText(f"状态：{ws_name} (reason={reason_name})")
+            if ws == 4:  # RESTING — 安抚结束
+                self.lbl_soothe_measure.setText("当前措施：- (会话结束)")
+
+    def _apply_soothe_session_start(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) >= 8:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            ts = int.from_bytes(p[4:8], "little", signed=False)
+            self._soothe_session_id = sid
+            self._soothe_measure_idx = 0
+            self._soothe_result_pending = True
+            self.lbl_soothe_session.setText(f"会话：#{sid} 开始 @{ts}")
+            self.lbl_soothe_measure.setText("当前措施：准备执行...")
+            self.lbl_soothe_result.setText("结果：等待中...")
+
+    def _apply_soothe_measure_exec(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) >= 11:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            step = p[4]
+            measure = p[5]
+            sub = p[6]
+            m_name = self.MEASURE_NAMES.get(measure, f"未知({measure})")
+            if measure == 3 and sub in self.US_SUB_NAMES:
+                m_name += f" ({self.US_SUB_NAMES[sub]})"
+            self._soothe_measure_idx = step
+            self.lbl_soothe_measure.setText(f"当前措施：第{step+1}步 — {m_name}")
+
+    def _apply_soothe_session_result(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) >= 11:
+            sid = int.from_bytes(p[0:4], "little", signed=False)
+            result = p[4]
+            ok_measure = p[9]
+            result_str = "✅ 成功" if result == 1 else "❌ 失败"
+            m_name = self.MEASURE_NAMES.get(ok_measure, f"未知({ok_measure})")
+            self._soothe_result_pending = False
+            self.lbl_soothe_result.setText(f"结果：{result_str} (有效措施={m_name})")
+
+    def _init_record_state(self) -> None:
+        self._rec_entries = []       # 当前记录的 entry 列表 [(type, ts_str), ...]
+        self._rec_remaining = 0      # 剩余记录数
+        self._rec_total = 0          # 本条记录总 entry 数
+        self._rec_received = 0       # 已收到 entry 数
+
+    def _send_record_get(self) -> None:
+        self._init_record_state()
+        self.txt_record_detail.clear()
+        self.lbl_record_info.setText("正在获取安抚记录...")
+        self._send(CTRL_CMD_CALM_RECORD_GET, b"", "CALM_RECORD_GET")
+
+    def _send_record_del(self) -> None:
+        self._send(CTRL_CMD_CALM_RECORD_DELETE, b"", "CALM_RECORD_DELETE")
+
+    @staticmethod
+    def _record_type_name(t: int) -> str:
+        names = {
+            0x01: "BARK",
+            0x02: "MUSIC",
+            0x03: "OWNER",
+            0x04: "US_25K",
+            0x05: "US_30K",
+            0x06: "US_DUAL",
+            0x10: "SUCCESS",
+            0x11: "FAIL",
+        }
+        return names.get(t, f"UNKNOWN(0x{t:02X})")
 
     def _set_mode_combo(self, mode: int) -> None:
         idx = self.cmb_mode.findData(int(mode))
@@ -802,6 +1039,59 @@ class MainWindow(QtWidgets.QWidget):
         idx = self.cmb_strategy_mode.findData(int(mode))
         if idx >= 0:
             self.cmb_strategy_mode.setCurrentIndex(idx)
+
+    def _apply_record_rsp(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) == 1 and p[0] == 0x00:
+            self.lbl_record_info.setText("记录信息：无更多安抚记录")
+            self.txt_record_detail.clear()
+            return
+
+        if len(p) >= 9 and p[0] == 0x00:
+            remaining = p[1]
+            entry_idx = p[2]
+            total_entries = p[3]
+            entry_type = p[4]
+            ts = int.from_bytes(p[5:9], "little", signed=False)
+            ts_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+
+            if entry_idx == 0:
+                self._init_record_state()
+                self._rec_total = total_entries
+                self.txt_record_detail.clear()
+
+            self._rec_remaining = remaining
+            self._rec_received = entry_idx + 1
+            type_name = self._record_type_name(entry_type)
+            self._rec_entries.append((type_name, ts_str))
+
+            # 更新显示
+            lines = []
+            for i, (tn, ts_s) in enumerate(self._rec_entries):
+                icon = "🐶" if tn == "BARK" else (
+                       "✅" if tn == "SUCCESS" else (
+                       "❌" if tn == "FAIL" else (
+                       "🎵" if tn in ("MUSIC", "OWNER") else "📡")))
+                lines.append(f"  {icon} [{i}] {tn}  @{ts_s}")
+            self.txt_record_detail.setText("\n".join(lines))
+
+            info = f"记录信息：第 {entry_idx+1}/{total_entries} 条, 剩余 {remaining} 条记录"
+            if entry_idx + 1 >= total_entries:
+                info += " (记录完整)"
+            self.lbl_record_info.setText(info)
+            return
+
+        self.lbl_record_info.setText(f"记录信息：异常响应 payload={p.hex()}")
+
+    def _apply_record_del_rsp(self, frame: CtrlFrame) -> None:
+        p = frame.payload
+        if len(p) >= 2 and p[0] == 0x00:
+            remaining = p[1]
+            self.lbl_record_info.setText(f"记录信息：已删除，剩余 {remaining} 条记录")
+            self.txt_record_detail.clear()
+            self._init_record_state()
+            return
+        self.lbl_record_info.setText("记录信息：删除失败")
 
     def _send_strategy_get(self) -> None:
         mode = int(self.cmb_strategy_mode.currentData())
