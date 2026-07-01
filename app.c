@@ -30,6 +30,8 @@
 #include "app_buffer.h"
 #include "app_uart.h"
 #include "app_ctrl.h"
+#include "app_uart.h"
+#include "app_ctrl.h"
 #include "app_ultrasonic.h"
 #include "app_input.h"
 #include "app_adc_mon.h"
@@ -177,6 +179,9 @@ void task_connect(u8 e, u8 *p, int n)
 #if (UI_LED_ENABLE)
     LOG_D("[APP][CONN] Connect request");
 #endif
+    g_ble_connected = 1;
+    u8 linked = 1;
+    app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, &linked, 1, NULL);
 }
 /**
  * @brief      callback function of LinkLayer Event "BLT_EV_FLAG_TERMINATE"
@@ -190,6 +195,9 @@ void task_terminate(u8 e, u8 *p, int n)  //*p is terminate reason
 #if (PM_DEEPSLEEP_ENABLE)
     device_in_connection_state = 0;
 #endif
+    g_ble_connected = 0;
+    u8 linked = 0;
+    app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, &linked, 1, NULL);
     tlk_contr_evt_terminate_t *pEvt = (tlk_contr_evt_terminate_t *)p;
     if (pEvt->terminate_reason == HCI_ERR_CONN_TIMEOUT)
     {

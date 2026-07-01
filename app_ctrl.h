@@ -102,6 +102,9 @@ enum
 extern u8 g_ctrlRxBuf[CTRL_RX_MAX_LEN];
 extern u8 g_ctrlTxBuf[CTRL_TX_MAX_LEN];
 
+/* BLE 连接状态，由 app.c 的 task_connect/task_terminate 更新 */
+extern u8 g_ble_connected;
+
 /**
  * @brief   Check if SOC is online via heartbeat
  * @return  1=online, 0=offline

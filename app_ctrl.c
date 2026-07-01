@@ -24,6 +24,9 @@
 u8 g_ctrlRxBuf[CTRL_RX_MAX_LEN] = {0};
 u8 g_ctrlTxBuf[CTRL_TX_MAX_LEN] = {0};
 
+// BLE 连接状态（由 app.c 的 task_connect/task_terminate 更新）
+u8 g_ble_connected = 0;
+
 // simple sequence generator for events/async notifications
 static u8 g_ctrlSeq = 0;
 
@@ -151,10 +154,21 @@ static void app_ctrl_state_try_push_event(void)
         return;  /* 无变化 */
     }
 
+    /* 逐字段对比，仅打印变化的字段 */
+    u8 changed = 0;
+    BLE_LOG_D("[STATE_PUSH] changed:");
+    if (cur[1] != s_pushed_status[1]) { BLE_LOG_D("  power=%d->%d", s_pushed_status[1], cur[1]); changed = 1; }
+    if (cur[2] != s_pushed_status[2]) { BLE_LOG_D("  work=%d->%d", s_pushed_status[2], cur[2]); changed = 1; }
+    if (cur[3] != s_pushed_status[3]) { BLE_LOG_D("  bt=%d->%d", s_pushed_status[3], cur[3]); changed = 1; }
+    if (cur[4] != s_pushed_status[4]) { BLE_LOG_D("  rec=%d->%d", s_pushed_status[4], cur[4]); changed = 1; }
+    if (cur[5] != s_pushed_status[5]) { BLE_LOG_D("  vol=%d->%d", s_pushed_status[5], cur[5]); changed = 1; }
+    if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  mode=%d->%d", s_pushed_status[6], cur[6]); changed = 1; }
+    if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
+    if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[8], cur[8]); changed = 1; }
+    if (!changed) { BLE_LOG_D("  (none)"); }
+
     memcpy(s_pushed_status, cur, sizeof(cur));
     app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_STATUS_GET, g_ctrlSeq++, cur, sizeof(cur));
-    BLE_LOG_D("[STATE_PUSH] power=%d work=%d bt=%d rec=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
-              cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7], cur[8]);
 }
 
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_power_ctrl;
@@ -794,6 +808,7 @@ static void app_ctrl_rsp_calm_strategy_get_from_soc(u8 cmdId, u8 seq, const u8 *
     (void)cmdId;
     (void)seq;
     app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    u8 rsp_mode = 0;
     if (!ctx)
     {
         return;
@@ -803,7 +818,7 @@ static void app_ctrl_rsp_calm_strategy_get_from_soc(u8 cmdId, u8 seq, const u8 *
     {
         BLE_LOG_D("[SOC_RSP] CALM_STRATEGY_GET len=%d", payloadLen);
         u8 idx                  = 1;
-        g_ctrlState.calmMode    = payload[idx++];
+        rsp_mode                = payload[idx++];  /* 查询结果中的 mode，仅转发给 APP，不覆盖当前模式 */
         g_ctrlState.enabledMask = payload[idx++];
         u8 measureCnt           = payload[idx++];
         BLE_LOG_D("[SOC_RSP] CALM_STRATEGY_GET mode=%d enabled=0x%02x mCnt=%d",
@@ -840,7 +855,7 @@ static void app_ctrl_rsp_calm_strategy_get_from_soc(u8 cmdId, u8 seq, const u8 *
     u8 rsp[16];
     u8 n     = 0;
     rsp[n++] = CTRL_STATUS_OK;
-    rsp[n++] = g_ctrlState.calmMode;
+    rsp[n++] = rsp_mode;
     rsp[n++] = g_ctrlState.enabledMask;
     rsp[n++] = g_ctrlState.measureOrderCount;
     for (u8 i = 0; i < g_ctrlState.measureOrderCount; i++)
@@ -2016,6 +2031,18 @@ void app_ctrl_time_task(void)
         app_ultrasonic_stop_emit();
         app_ultrasonic_set_power(0);
         g_ultra_stop_tick = 0;
+    }
+
+    /* 每秒轮询蓝牙连接状态并通知 SOC（SOC 重启后可恢复正确灯色）*/
+    {
+        static u8 s_last_bt = 0xFF;
+        u8 now_bt = g_ble_connected;
+        if (now_bt != s_last_bt)
+        {
+            s_last_bt = now_bt;
+            app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, &now_bt, 1, NULL);
+            BLE_LOG_D("[BT_POLL] linked=%d", now_bt);
+        }
     }
 
     app_ctrl_time_cache_update();
