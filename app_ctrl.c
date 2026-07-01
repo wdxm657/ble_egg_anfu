@@ -603,6 +603,81 @@ static void app_ctrl_evt_soc_error_from_soc(u8 cmdId, u8 seq, const u8 *payload,
     }
 }
 
+/* 超声波发射状态跟踪 */
+_attribute_data_retention_ static u32 g_ultra_stop_tick = 0;
+
+/**
+ * @brief  Callback: SOC 通知 MCU 执行超声波发射 (0x68).
+ *         payload: [profile(1), duration_sec(1)]
+ *           profile=1..3: 启动发射指定时长
+ *           profile=0:     停止发射
+ */
+u8 g_sec = 0;
+static void app_ctrl_evt_ultra_emit_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (payloadLen < 2)
+    {
+        return;
+    }
+
+    u8 profile = payload[0];
+    g_sec = payload[1];
+
+    if (profile == 0)
+    {
+        /* 停止发射 */
+        BLE_LOG_D("[SOC_EVT] ULTRA_EMIT stop");
+        app_ultrasonic_stop_emit();
+        app_ultrasonic_set_power(0);
+        g_ultra_stop_tick = 0;
+        return;
+    }
+
+    /* 映射 profile → 频率命令 */
+    u8 freq_cmd;
+    switch (profile)
+    {
+    case 1:  freq_cmd = 0x01; break;  /* 25KHz */
+    case 2:  freq_cmd = 0x02; break;  /* 30KHz */
+    case 3:  freq_cmd = 0x03; break;  /* 双频 */
+    default:
+        BLE_LOG_D("[SOC_EVT] ULTRA_EMIT unknown profile=%u", profile);
+        return;
+    }
+
+    BLE_LOG_D("[SOC_EVT] ULTRA_EMIT profile=%u freq=0x%02x duration=%us", profile, freq_cmd, g_sec);
+
+    /* 安全限制：单次发射最长 10 秒 */
+    if (g_sec > 10) g_sec = 10;
+
+    /* 先停止上一次发射（如有） */
+    if (g_ultra_stop_tick != 0)
+    {
+        app_ultrasonic_stop_emit();
+        app_ultrasonic_set_power(0);
+        g_ultra_stop_tick = 0;
+        sleep_us(50000);
+    }
+
+    app_ultrasonic_set_power(1);
+    sleep_us(50000);  /* 等待模组上电稳定 */
+
+    if (app_ultrasonic_start_emit(freq_cmd) != 0)
+    {
+        BLE_LOG_D("[SOC_EVT] ULTRA_EMIT start failed");
+        app_ultrasonic_set_power(0);
+        return;
+    }
+
+    /* 记录停止时间 */
+    g_ultra_stop_tick = clock_time();
+    BLE_LOG_D("[SOC_EVT] ULTRA_EMIT started, stop at tick=%lu", g_ultra_stop_tick);
+}
+
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
     (void)cmdId;
@@ -1929,10 +2004,20 @@ void app_ctrl_init(void)
     app_uart_register_evt_handler(UART_SOC_MEASURE_EXEC_EVT,   app_ctrl_evt_measure_exec_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_SESSION_RESULT_EVT, app_ctrl_evt_session_result_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_ERROR_EVT,          app_ctrl_evt_soc_error_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_ULTRA_EMIT_EVT,      app_ctrl_evt_ultra_emit_from_soc, 0);
 }
 
 void app_ctrl_time_task(void)
 {
+    /* 超声波发射超时停止 */
+    if (g_ultra_stop_tick != 0 && clock_time_exceed(g_ultra_stop_tick, g_sec * 1000000))
+    {
+        BLE_LOG_D("[ULTRA] emit timeout, stopping");
+        app_ultrasonic_stop_emit();
+        app_ultrasonic_set_power(0);
+        g_ultra_stop_tick = 0;
+    }
+
     app_ctrl_time_cache_update();
 
     // Check SOC heartbeat timeout
