@@ -415,7 +415,7 @@ class BleController:
                             frame = build_ctrl_cmd_frame(cmd_id, seq, payload)
                             await client.write_gatt_char(rx_char, frame, response=False)
                             self._log(
-                                f"[SEND] {desc} cmd={CMD_NAME.get(cmd_id, hex(cmd_id))} seq={seq} payload={payload.hex()}"
+                                f"[SEND] {desc} cmd={CMD_NAME.get(cmd_id, hex(cmd_id))} seq={seq} len={len(payload)} payload={payload.hex()}"
                             )
                         except queue.Empty:
                             pass
@@ -594,12 +594,13 @@ class MainWindow(QtWidgets.QWidget):
         self.chk_us.setChecked(True)
         self.ed_measure_order = QtWidgets.QLineEdit("1,3")
         self.ed_us_order = QtWidgets.QLineEdit("1,2,3")
+        self.cmb_strategy_mode = QtWidgets.QComboBox()
+        self.cmb_strategy_mode.addItem("自动策略(0)", 0)
+        self.cmb_strategy_mode.addItem("手动策略(1)", 1)
         btn_strategy_set = QtWidgets.QPushButton("策略设置")
         btn_strategy_get = QtWidgets.QPushButton("策略查询")
         btn_strategy_set.clicked.connect(self._send_strategy_set)
-        btn_strategy_get.clicked.connect(
-            lambda: self._send(CTRL_CMD_CALM_STRATEGY_GET, b"", "CALM_STRATEGY_GET")
-        )
+        btn_strategy_get.clicked.connect(self._send_strategy_get)
         b4.addWidget(self.chk_music, 0, 0)
         b4.addWidget(self.chk_owner, 0, 1)
         b4.addWidget(self.chk_us, 0, 2)
@@ -607,10 +608,12 @@ class MainWindow(QtWidgets.QWidget):
         b4.addWidget(self.ed_measure_order, 1, 1, 1, 2)
         b4.addWidget(QtWidgets.QLabel("超声顺序(1,2,3):"), 2, 0)
         b4.addWidget(self.ed_us_order, 2, 1, 1, 2)
-        b4.addWidget(btn_strategy_set, 3, 1)
-        b4.addWidget(btn_strategy_get, 3, 2)
-        # self.lbl_strategy_query = QtWidgets.QLabel("策略查询结果：-")
-        # b4.addWidget(self.lbl_strategy_query, 4, 0, 1, 3)
+        b4.addWidget(QtWidgets.QLabel("查询策略:"), 3, 0)
+        b4.addWidget(self.cmb_strategy_mode, 3, 1)
+        b4.addWidget(btn_strategy_set, 4, 1)
+        b4.addWidget(btn_strategy_get, 4, 2)
+        self.lbl_strategy_query = QtWidgets.QLabel("策略查询结果：-")
+        b4.addWidget(self.lbl_strategy_query, 5, 0, 1, 3)
         grid.addWidget(box_strategy, 1, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
@@ -774,20 +777,44 @@ class MainWindow(QtWidgets.QWidget):
             us_order = list(p[idx : idx + u_cnt])
 
             self._set_mode_combo(mode)
+            self._set_strategy_mode_combo(mode)
             self.chk_music.setChecked(bool(enabled & 0x01))
             self.chk_owner.setChecked(bool(enabled & 0x02))
             self.chk_us.setChecked(bool(enabled & 0x04))
             self.ed_measure_order.setText(",".join(str(v) for v in measure_order))
             self.ed_us_order.setText(",".join(str(v) for v in us_order))
-            # self.lbl_strategy_query.setText(
-            #     f"策略查询结果：mode={mode} enabledMask=0x{enabled:02X} "
-            #     f"measureOrder={measure_order} usOrder={us_order}"
-            # )
+            measure_names = [self._measure_name(v) for v in measure_order]
+            us_names = [self._us_name(v) for v in us_order]
+            mode_name = "自动" if mode == 0 else ("手动" if mode == 1 else f"未知({mode})")
+            self.lbl_strategy_query.setText(
+                f"策略查询结果({mode_name})："
+                f"enabledMask=0x{enabled:02X} "
+                f"measureOrder={measure_order}{measure_names} "
+                f"usOrder={us_order}{us_names}"
+            )
 
     def _set_mode_combo(self, mode: int) -> None:
         idx = self.cmb_mode.findData(int(mode))
         if idx >= 0:
             self.cmb_mode.setCurrentIndex(idx)
+
+    def _set_strategy_mode_combo(self, mode: int) -> None:
+        idx = self.cmb_strategy_mode.findData(int(mode))
+        if idx >= 0:
+            self.cmb_strategy_mode.setCurrentIndex(idx)
+
+    def _send_strategy_get(self) -> None:
+        mode = int(self.cmb_strategy_mode.currentData())
+        payload = bytes([mode])
+        self._send(CTRL_CMD_CALM_STRATEGY_GET, payload, f"CALM_STRATEGY_GET mode={mode}")
+
+    @staticmethod
+    def _measure_name(v: int) -> str:
+        return {1: "music", 2: "owner_voice", 3: "ultrasonic"}.get(v, f"unknown({v})")
+
+    @staticmethod
+    def _us_name(v: int) -> str:
+        return {1: "25k", 2: "30k", 3: "25k+30k"}.get(v, f"unknown({v})")
 
     def closeEvent(self, event) -> None:
         self.ctrl.stop()

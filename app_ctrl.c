@@ -1491,8 +1491,16 @@ static int app_ctrl_handle_calm_strategy_set(u8 seq, u8 *payload, u16 len)
 
 static int app_ctrl_handle_calm_strategy_get(u8 seq, u8 *payload, u16 len)
 {
-    (void)payload;
-    if (len != 0)
+    u8 mode;
+
+    if (len != 1)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    mode = payload[0];
+    if (mode > 1)
     {
         u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_GET, seq, rsp, sizeof(rsp));
@@ -1505,8 +1513,8 @@ static int app_ctrl_handle_calm_strategy_get(u8 seq, u8 *payload, u16 len)
 
     g_ctx_calm_strategy_get.bleSeq = seq;
     if (app_uart_send_cmd_with_cb(UART_SOC_CALM_STRATEGY_GET,
-                                  0,
-                                  0,
+                                  &mode,
+                                  1,
                                   app_ctrl_rsp_calm_strategy_get_from_soc,
                                   &g_ctx_calm_strategy_get,
                                   0) != 0)
