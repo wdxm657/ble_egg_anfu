@@ -176,10 +176,10 @@ enum{
 	#define	GPIO_SOC_SWITCH         GPIO_PD4  // 输出 SOC电源开关 默认高电平
 	#define PD4_FUNC				AS_GPIO
 	#define PD4_OUTPUT_ENABLE		1
-	#define	GPIO_LED_CHARGE_GREN  GPIO_PC0  // 输出 充电指示绿灯 默认高电平
+	#define	GPIO_LED_CHARGE_GREN   GPIO_PC1  // 输出 充电指示绿灯 默认高电平
 	#define PC0_FUNC				AS_GPIO
 	#define PC0_OUTPUT_ENABLE		1
-	#define	GPIO_LED_CHARGE_RED   GPIO_PC1  // 输出 充电指示红灯 默认高电平
+	#define	GPIO_LED_CHARGE_RED    GPIO_PC0  // 输出 充电指示红灯 默认高电平
 	#define PC1_FUNC          		AS_GPIO
 	#define	PC1_OUTPUT_ENABLE		1
 	#define	GPIO_CHARGE_EN   		GPIO_PB6  // 输出 充电使能 默认高电平

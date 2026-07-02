@@ -483,15 +483,15 @@ void app_adc_mon_poll(void)
 
         s_bat_mv = (mv_bat_avg > 0xFFFFu) ? 0xFFFFu : (u16)mv_bat_avg;
 
-        // /* 每秒日志 */
-        // if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
-        // {
-        //     s_log_tick = now;
-        //     if (s_ntc_temp_valid)
-        //         BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=%dC charge=%d", s_bat_mv, s_bat_percent, s_ntc_temp_c, is_charging);
-        //     else
-        //         BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=INVALID charge=%d", s_bat_mv, s_bat_percent, is_charging);
-        // }
+        /* 每秒日志 */
+        if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
+        {
+            s_log_tick = now;
+            if (s_ntc_temp_valid)
+                BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=%dC charge=%d", s_bat_mv, s_bat_percent, s_ntc_temp_c, is_charging);
+            else
+                BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=INVALID charge=%d", s_bat_mv, s_bat_percent, is_charging);
+        }
 
         /* 温控充电管理 */
         app_adc_mon_temp_charge_manage();

@@ -958,30 +958,7 @@ void                           app_flash_protection_operation(u8 flash_op_evt, u
     /* add more flash protection operation for your application if needed */
 }
 #endif
-
-#define FUNC_ELAPSED_TEST 0
-
-#if (UI_LED_ENABLE)
-static u32 g_led_charge_tick = 0;
-
-/**
- * @brief     充电指示灯红绿交替闪烁（每秒翻转一次）
- * @param[in] none
- * @return    none
- */
-static void app_led_charge_indicate(void)
-{
-    static u8 g_led_charge_state = 0;
-    if (clock_time_exceed(g_led_charge_tick, 1000000))
-    {
-        g_led_charge_tick = clock_time();
-        g_led_charge_state = !g_led_charge_state;
-        gpio_write(GPIO_LED_CHARGE_RED,  g_led_charge_state);
-        gpio_write(GPIO_LED_CHARGE_GREN, !g_led_charge_state);
-    }
-}
-#endif
-
+_attribute_data_retention_ static u8 s_bat_percent_last_reported = 0xFF;
 /**
  * @brief     BLE main loop
  * @param[in]  none.
@@ -992,20 +969,23 @@ void main_loop(void)
     ////////////////////////////////////// BLE entry /////////////////////////////////
     blc_sdk_main_loop();
 
+    u8 bat_percent_now = app_adc_mon_get_bat_percent();
+    {
+        if (bat_percent_now != s_bat_percent_last_reported)
+        {
+            s_bat_percent_last_reported = bat_percent_now;
+            // BLE_LOG_D("bat: %d", bat_percent_now);
+            app_att_battery_update(bat_percent_now);
+        }
+    }
+
     app_uart_task();
     app_ctrl_time_task();
     app_input_poll();
     app_adc_mon_poll();
 
 #if (UI_LED_ENABLE)
-    app_led_charge_indicate();  // 充电指示灯红绿交替闪烁
-    if (g_app_power_on)
-    {
-        app_ui_led_task();
-    }
-    else
-    {
-    }
+    app_ui_led_task();
 #endif
     // ////////////////////////////////////// PM Process /////////////////////////////////
     blt_pm_proc();

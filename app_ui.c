@@ -30,23 +30,60 @@
 #include "app_att.h"
 #include "app_ui.h"
 #include "app_ctrl.h"
+#include "app_adc_mon.h"
 
 #define LED_BLINK_INTERVAL_US 500000
 
 static u32 g_led_blink_tick = 0;
 static u8  g_led_blink_on   = 0;
 
-static void app_ui_led_all_off(void)
-{
-#if (UI_LED_ENABLE)
-#endif
-}
-
-
+/**
+ * @brief     电池状态 LED 指示
+ *             - 绿色闪烁(500ms): 充电中
+ *             - 绿色常亮:       已充满电 (USB 插入但不在充电)
+ *             - 红色闪烁(500ms): 电量不足 (< 15%)
+ *             - 两灯灭:         正常待机/放电
+ * @param[in] none
+ * @return    none
+ */
 void app_ui_led_task(void)
 {
 #if (UI_LED_ENABLE)
     u32 now = clock_time();
+
+    /* 500ms 闪烁定时器 */
+    if (clock_time_exceed(g_led_blink_tick, LED_BLINK_INTERVAL_US))
+    {
+        g_led_blink_tick = now;
+        g_led_blink_on   = !g_led_blink_on;
+    }
+
+    u8 charging    = app_adc_mon_is_charging();
+    u8 bat_percent = app_adc_mon_get_bat_percent_exact();
+
+    if (charging)
+    {
+        /* 充电中 → 绿色闪烁 */
+        gpio_write(GPIO_LED_CHARGE_GREN, g_led_blink_on ? LED_ON_LEVEL : !LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED,  !LED_ON_LEVEL);
+    }
+    else if (bat_percent > 80)
+    {
+        gpio_write(GPIO_LED_CHARGE_GREN, LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED,  !LED_ON_LEVEL);
+    }
+    else if (bat_percent < 15)
+    {
+        /* 电量不足 → 红色闪烁 */
+        gpio_write(GPIO_LED_CHARGE_GREN, !LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED,  g_led_blink_on ? LED_ON_LEVEL : !LED_ON_LEVEL);
+    }
+    else
+    {
+        /* 常规放电 → 两灯灭 */
+        gpio_write(GPIO_LED_CHARGE_GREN, !LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED,  !LED_ON_LEVEL);
+    }
 #endif
 }
 
