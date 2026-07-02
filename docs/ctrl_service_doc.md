@@ -490,7 +490,7 @@
 
 #### 4.11 安抚记录读取（CALM_RECORD_GET，CMD = `0x33`）
 
-用途：获取最旧的一条安抚会话记录。设备会将本条记录的所有 entry 逐条通过 NOTIFY 上报，APP 收到全部 entry 后，应调用 `CALM_RECORD_DELETE(0x3A)` 删除此记录，再继续获取下一条，直到无记录为止。
+用途：获取最旧的一条安抚会话记录。设备会将本条记录的所有 entry 逐条通过 NOTIFY 上报。每条 entry 携带 `session_id`，APP 可据此在读取完成后调用 `CALM_RECORD_DELETE(0x3A)` 删除对应记录。再继续获取下一条，直到无记录为止。
 
 **请求帧（APP → 设备），总长 6 字节**
 
@@ -509,21 +509,20 @@
 **单条 entry 响应帧（设备 → APP），总长 15 字节**
 
 
-|                |                        |                                        |
-| -------------- | ---------------------- | -------------------------------------- |
-| 字节           | 值/变量                | 注释                                   |
-| byte0          | `0x01`                 | 协议版本                               |
-| byte1          | `0x02`                 | RSP                                    |
-| byte2          | `0x33`                 | CALM_RECORD_GET                        |
-| byte3          | `seq`                  | 与请求一致                             |
-| byte4          | `0x09`                 | 负载长度 = 9                           |
-| byte5          | `0x00`                 | 长度高字节                             |
-| byte6          | `status`               | 本条为 `0x00`                          |
-| byte7          | `remainingRecords`     | 取出本条记录后，SOC 中还剩几条安抚记录 |
-| byte8          | `entryIdx`             | 本条 entry 在该记录中的索引，`0`起     |
-| byte9          | `totalEntriesInRecord` | 本记录总共包含多少条 entry             |
-| byte10         | `type`                 | entry 类型（见下表）                   |
-| byte11～byte14 | `ts`                   | Unix 时间戳（秒），uint32 LE           |
+|                |                        |                                                    |
+| -------------- | ---------------------- | -------------------------------------------------- |
+| byte0          | `0x01`                 | 协议版本                                           |
+| byte1          | `0x02`                 | RSP                                                |
+| byte2          | `0x33`                 | CALM_RECORD_GET                                    |
+| byte3          | `seq`                  | 与请求一致                                         |
+| byte4          | `0x09`                 | 负载长度 = 9                                       |
+| byte5          | `0x00`                 | 长度高字节                                         |
+| byte6          | `status`               | 本条为 `0x00`                                      |
+| byte7          | `entryIdx`             | 本条 entry 在该记录中的索引，`0`起                 |
+| byte8          | `totalEntriesInRecord` | 本记录总共包含多少条 entry                         |
+| byte9          | `session_id`           | 本条记录所属的会话 ID（1 字节，用于删除）          |
+| byte10         | `type`                 | entry 类型（见下表）                               |
+| byte11～byte14 | `ts`                   | Unix 时间戳（秒），uint32 LE                       |
 
 
 **entry type 定义**
@@ -560,51 +559,51 @@
 **APP 建议流程**：
 
 1. 发送 `CALM_RECORD_GET`（空 payload）
-2. 接收多条 `entry` 响应帧，按 `entryIdx` / `totalEntriesInRecord` 拼成完整记录
+2. 接收多条 `entry` 响应帧，按 `entryIdx` / `totalEntriesInRecord` 拼成完整记录，记录 `session_id`
 3. 当 `entryIdx == totalEntriesInRecord - 1` 时，本条记录接收完毕
-4. 调用 `CALM_RECORD_DELETE` 删除该记录
-5. 若 `remainingRecords > 0`，回到步骤 1 继续获取下一条
+4. 调用 `CALM_RECORD_DELETE` 并传入该记录的 `session_id` 以删除
+5. 再次发送 `CALM_RECORD_GET` 获取下一条，重复步骤 2~4
 6. 收到 `no records`（`payloadLen=1`），结束
 
-**错误短包示例**：总长 8 字节，`byte6=status`，`byte7=0x00`（如 BUSY、SOC_TIMEOUT）。
+**错误短包示例**：总长 7 字节，`byte6=status`，`byte7=0x00`。
 
 ---
 
 #### 4.12 安抚记录删除（CALM_RECORD_DELETE，CMD = `0x3A`）
 
-用途：APP 读取完一条记录的全部 entry 后，调用此接口删除 SOC 中最旧的那条记录。
+用途：APP 读取完一条记录的全部 entry 后，调用此接口传入 `session_id` 删除指定记录。
 
-**请求帧（APP → 设备），总长 6 字节**
-
-
-|       |         |                    |
-| ----- | ------- | ------------------ |
-| 字节  | 值/变量 | 注释               |
-| byte0 | `0x01`  | 协议版本           |
-| byte1 | `0x01`  | CMD                |
-| byte2 | `0x3A`  | CALM_RECORD_DELETE |
-| byte3 | `seq`   | 序号               |
-| byte4 | `0x00`  | 负载长度 = 0       |
-| byte5 | `0x00`  | 长度高字节         |
+**请求帧（APP → 设备），总长 7 字节**
 
 
-**响应帧成功（设备 → APP），总长 8 字节**
+|            |              |                                    |
+| ---------- | ------------ | ---------------------------------- |
+| 字节       | 值/变量      | 注释                               |
+| byte0      | `0x01`       | 协议版本                           |
+| byte1      | `0x01`       | CMD                                |
+| byte2      | `0x3A`       | CALM_RECORD_DELETE                 |
+| byte3      | `seq`        | 序号                               |
+| byte4      | `0x01`       | 负载长度 = 1                       |
+| byte5      | `0x00`       | 长度高字节                         |
+| byte6      | `session_id` | 要删除的记录的会话 ID（1 字节）    |
 
 
-|       |                    |                               |
-| ----- | ------------------ | ----------------------------- |
-| 字节  | 值/变量            | 注释                          |
-| byte0 | `0x01`             | 协议版本                      |
-| byte1 | `0x02`             | RSP                           |
-| byte2 | `0x3A`             | CALM_RECORD_DELETE            |
-| byte3 | `seq`              | 与请求一致                    |
-| byte4 | `0x02`             | 负载长度 = 2                  |
-| byte5 | `0x00`             | 长度高字节                    |
-| byte6 | `status`           | `0x00`                        |
-| byte7 | `remainingRecords` | 删除后 SOC 中剩余的安抚记录数 |
+**响应帧成功（设备 → APP），总长 7 字节**
 
 
-**响应帧失败**：总长 8 字节，`byte6=0x04`（INTERNAL_ERROR），`byte7=0x00`。
+|       |          |                               |
+| ----- | -------- | ----------------------------- |
+| 字节  | 值/变量  | 注释                          |
+| byte0 | `0x01`   | 协议版本                      |
+| byte1 | `0x02`   | RSP                           |
+| byte2 | `0x3A`   | CALM_RECORD_DELETE            |
+| byte3 | `seq`    | 与请求一致                    |
+| byte4 | `0x01`   | 负载长度 = 1                  |
+| byte5 | `0x00`   | 长度高字节                    |
+| byte6 | `status` | `0x00`=成功                   |
+
+
+**响应帧失败**：总长 7 字节，`byte6=0x06`（SOC_TIMEOUT）或 `0x07`（SOC_ERROR）。
 
 ---
 
@@ -1055,6 +1054,36 @@ SOC 端发生内部错误时主动推送。
 | byte6 | `errCode` | SOC 错误码（见 SOC 侧定义） |
 
 
+#### 5.8 安抚记录可用通知（CALM_RECORD_NOTIFY，EVENT cmd = `0x84`）
+
+SOC 端每秒检查一次安抚记录文件，当检测到有已存储的完整记录且 BLE 已连接时，以 EVENT 形式通知上位机（只要记录存在且 BLE 连接就会每秒持续通知）。
+
+**触发时机**：
+- SOC 每秒轮询，检测到有安抚记录 + BLE 已连接，每秒发送通知
+- APP 读取并删除记录后通知停止（无新记录时不再发送）
+
+**事件帧，总长 7 字节**
+
+
+|       |              |                                            |
+| ----- | ------------ | ------------------------------------------ |
+| 字节  | 值/变量      | 注释                                       |
+| byte0 | `0x01`       | 协议版本                                   |
+| byte1 | `0x03`       | EVENT                                      |
+| byte2 | `0x84`       | CTRL_CMD_CALM_RECORD_NOTIFY                |
+| byte3 | `seq`        | 事件序号                                   |
+| byte4 | `0x01`       | 负载长度 = 1                               |
+| byte5 | `0x00`       | 长度高字节                                 |
+| byte6 | `recordCount`| 当前存储的安抚记录数（固定为 `0x01`）       |
+
+
+**APP 建议处理方式**：
+- 收到此 EVENT 后，表示设备端有安抚记录可用
+- 用户如需读取具体记录，点击「查询安抚记录」按钮调用 `CALM_RECORD_GET(0x33)` 获取
+- 记录的完整管理与删除仍通过 `CALM_RECORD_GET(0x33)` / `CALM_RECORD_DELETE(0x3A)` 由 APP 控制
+
+---
+
 #### 5.3 状态变更事件（STATUS_CHANGED，EVENT cmd = `0x13`）
 
 当设备运行时状态（电源/工作/录音/音量/模式/使能位等）发生任何变化时，设备主动推送完整状态快照。  
@@ -1091,6 +1120,7 @@ APP 应在收到此事件后刷新本地缓存的状态展示，无需再次调�
 
 1. 连接后先开启 `Ctrl TX` Notify。
 2. 请求维护 `seq`，响应按 `cmdId + seq` 匹配。
-3. `CALM_RECORD_GET(0x33)` 按逐条 entry 的 `entryIdx / totalEntriesInRecord` 拼成完整记录；拿到记录的最后一条 entry 后调用 `CALM_RECORD_DELETE(0x3A)` 删除，循环直至无记录。
-4. 若 `status != 0x00`，结合 §3 与对应接口的 `errDetail`（若有）提示用户或重试。
+3. `CALM_RECORD_GET(0x33)` 按逐条 entry 的 `entryIdx / totalEntriesInRecord` 拼成完整记录，并记录 `session_id`；拿到记录的最后一条 entry 后调用 `CALM_RECORD_DELETE(0x3A)` 传入该 `session_id` 删除，循环直至无记录。
+4. 若收到 `CALM_RECORD_NOTIFY(0x84)` EVENT，表示设备端当前存在安抚记录，可点击「查询安抚记录」按钮读取，或忽略在适当时机再查。该通知每秒重复发送，直到记录被读取删除。
+5. 若 `status != 0x00`，结合 §3 与对应接口的 `errDetail`（若有）提示用户或重试。
 

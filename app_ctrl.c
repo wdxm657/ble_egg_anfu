@@ -191,12 +191,13 @@ _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_calm_strategy_get
 
 typedef struct
 {
-    u8 bleSeq;
-    u8 maxCount;
-    u8 totalSend;
-    u8 total;
-    u8 sent;
-    u8 busy;
+    u8  bleSeq;
+    u8  maxCount;
+    u8  totalSend;
+    u8  total;
+    u8  sent;
+    u8  busy;
+    u32 busy_tick;  /* clock_time() when busy was set, for timeout */
 } app_ctrl_record_req_ctx_t;
 
 _attribute_data_retention_ static app_ctrl_record_req_ctx_t g_ctx_calm_record_get;
@@ -692,6 +693,32 @@ static void app_ctrl_evt_ultra_emit_from_soc(u8 cmdId, u8 seq, const u8 *payload
     BLE_LOG_D("[SOC_EVT] ULTRA_EMIT started, stop at tick=%lu", g_ultra_stop_tick);
 }
 
+/**
+ * @brief  Callback: SOC new calm record event (0x88).
+ *         SOC 完成一条安抚记录并持久化后发送此事件。
+ *         如果 BLE 已连接，通过 TEXT_CHUNK 通知上位机有新记录可用。
+ *         payload: 无内容。
+ */
+static void app_ctrl_evt_new_calm_record_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)payload;
+    (void)payloadLen;
+    (void)userData;
+
+    BLE_LOG_D("[SOC_EVT] NEW_CALM_RECORD");
+
+    if (!g_ble_connected)
+    {
+        BLE_LOG_D("[SOC_EVT] NEW_CALM_RECORD: BLE not connected, skip notify");
+        return;
+    }
+
+    /* BLE 已连接，发送文本通知到上位机 */
+    app_ctrl_notify_new_record();
+}
+
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
     (void)cmdId;
@@ -875,8 +902,14 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
     (void)cmdId;
     (void)seq;
     app_ctrl_record_req_ctx_t *ctx = (app_ctrl_record_req_ctx_t *)userData;
+
+    if (!ctx || !ctx->busy)
+    {
+        return;
+    }
+
     u8                         entryCnt;
-    u8                         remaining;
+    u8                         session_id;
 
     if (!ctx || !ctx->busy)
     {
@@ -888,20 +921,7 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
         BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET failed soc_status=0x%02x len=%d",
                   payloadLen ? payload[0] : 0xFF,
                   payloadLen);
-        u8 rsp[3] = {CTRL_STATUS_INTERNAL_ERROR, 0, 0};
-        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
-        ctx->busy = 0;
-        return;
-    }
-
-    remaining = payload[1]; /* 剩余记录数 */
-    entryCnt  = payload[2]; /* 本条记录 entry 数 */
-
-    if (entryCnt == 0)
-    {
-        /* 无记录 */
-        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET no records remaining=%d", remaining);
-        u8 rsp[1] = {CTRL_STATUS_OK};
+        u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
         ctx->busy = 0;
         return;
@@ -909,41 +929,52 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
 
     /*
      * SOC 响应格式：
-     *   payload[0..2] = header (status, remainingCount, entryCount)
+     *   payload[0]   = status
+     *   payload[1]   = session_id (1 byte)
+     *   payload[2]   = entryCount
      *   后续每条 entry = [type(1B), ts(4B)] = 5B
      *
-     * BLE 通知格式（9 字节，每条 entry 一条通知）：
-     *   [0] status, [1] remainingRecords, [2] entryIdx,
-     *   [3] totalEntriesInRecord, [4] type, [5-8] ts (u32 LE)
+     * BLE 响应格式（9 字节，每条 entry 一条 notify）：
+     *   [0] status, [1] entryIdx, [2] totalEntriesInRecord,
+     *   [3] session_id (1B),
+     *   [4] type, [5-8] ts (u32 LE)
      */
-    u16 pos = 3;
+    session_id = payload[1];
+    entryCnt   = payload[2];
+
+    if (entryCnt == 0)
+    {
+        /* 无记录 */
+        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET no records");
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        ctx->busy = 0;
+        return;
+    }
+
+    u16 pos = 3;  /* status(1) + session_id(1) + entryCount(1) */
     for (u8 i = 0; i < entryCnt; i++)
     {
         if ((u16)(pos + 5) > payloadLen)
         {
             BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET entry truncated at %d pos=%d len=%d",
-                      i,
-                      pos,
-                      payloadLen);
+                      i, pos, payloadLen);
             break;
         }
 
         u8 rsp[9];
         rsp[0] = CTRL_STATUS_OK;
-        rsp[1] = remaining;        /* remainingRecords */
-        rsp[2] = i;                /* entryIdx */
-        rsp[3] = entryCnt;         /* totalEntriesInRecord */
+        rsp[1] = i;                /* entryIdx */
+        rsp[2] = entryCnt;         /* totalEntriesInRecord */
+        rsp[3] = session_id;       /* session_id (1B) */
         rsp[4] = payload[pos];     /* type */
         rsp[5] = payload[pos + 1]; /* ts LSB */
         rsp[6] = payload[pos + 2];
         rsp[7] = payload[pos + 3];
         rsp[8] = payload[pos + 4]; /* ts MSB */
 
-        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET entry %d/%d type=0x%02x remaining=%d",
-                  i,
-                  entryCnt,
-                  payload[pos],
-                  remaining);
+        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET entry %d/%d type=0x%02x session_id=%d",
+                  i, entryCnt, payload[pos], session_id);
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
         sleep_us(8000);
 
@@ -1739,8 +1770,9 @@ static int app_ctrl_handle_calm_record_get(u8 seq, u8 *payload, u16 len)
     }
 
     memset(&g_ctx_calm_record_get, 0, sizeof(g_ctx_calm_record_get));
-    g_ctx_calm_record_get.bleSeq = seq;
-    g_ctx_calm_record_get.busy   = 1;
+    g_ctx_calm_record_get.bleSeq    = seq;
+    g_ctx_calm_record_get.busy      = 1;
+    g_ctx_calm_record_get.busy_tick = clock_time();
 
     if (app_uart_send_cmd_with_cb(UART_SOC_CALM_RECORD_GET,
                                   0,
@@ -1767,24 +1799,22 @@ static void app_ctrl_rsp_calm_record_delete_from_soc(u8 cmdId, u8 seq, const u8 
         return;
     }
 
-    if (payloadLen >= 2 && payload[0] == 0x00)
+    if (payloadLen >= 1 && payload[0] == 0x00)
     {
-        u8 remaining = payload[1];
-        BLE_LOG_D("[SOC_RSP] CALM_RECORD_DELETE OK remaining=%d", remaining);
-        u8 rsp[2] = {CTRL_STATUS_OK, remaining};
+        BLE_LOG_D("[SOC_RSP] CALM_RECORD_DELETE OK");
+        u8 rsp[1] = {CTRL_STATUS_OK};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
         return;
     }
 
     BLE_LOG_D("[SOC_RSP] CALM_RECORD_DELETE failed soc_status=0x%02x", payloadLen ? payload[0] : 0xFF);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    u8 rsp[1] = {CTRL_STATUS_SOC_ERROR};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
 static int app_ctrl_handle_calm_record_delete(u8 seq, u8 *payload, u16 len)
 {
-    (void)payload;
-    if (len != 0)
+    if (len != 1)
     {
         u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_DELETE, seq, rsp, sizeof(rsp));
@@ -1797,8 +1827,8 @@ static int app_ctrl_handle_calm_record_delete(u8 seq, u8 *payload, u16 len)
 
     g_ctx_calm_record_delete.bleSeq = seq;
     if (app_uart_send_cmd_with_cb(UART_SOC_CALM_RECORD_DELETE,
-                                  0,
-                                  0,
+                                  payload,
+                                  1,
                                   app_ctrl_rsp_calm_record_delete_from_soc,
                                   &g_ctx_calm_record_delete,
                                   0) != 0)
@@ -1808,6 +1838,27 @@ static int app_ctrl_handle_calm_record_delete(u8 seq, u8 *payload, u16 len)
         return -2;
     }
     return 0;
+}
+
+/**
+ * @brief  通知上位机有新的安抚记录可用（通过 TEXT_CHUNK 发送纯文本）。
+ *         在以下场景调用：
+ *           - BLE 连接成功 (task_connect)
+ *           - SOC 完成一条新记录且 BLE 已连接 (DS_EVT_NEW_CALM_RECORD)
+ *
+ *         上位机收到后自行决定是否调用 CALM_RECORD_GET(0x33) 读取记录。
+ */
+void app_ctrl_notify_new_record(void)
+{
+    if (!g_ble_connected)
+    {
+        return;
+    }
+
+    BLE_LOG_D("[NOTIFY] new calm record available");
+    u8 evt[1] = {1};  /* recordCount=1, 表示有记录可用 */
+    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_CALM_RECORD_NOTIFY,
+                  g_ctrlSeq++, evt, sizeof(evt));
 }
 
 static int app_ctrl_handle_factory_reset(u8 seq, u8 *payload, u16 len)
@@ -2019,7 +2070,8 @@ void app_ctrl_init(void)
     app_uart_register_evt_handler(UART_SOC_MEASURE_EXEC_EVT,   app_ctrl_evt_measure_exec_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_SESSION_RESULT_EVT, app_ctrl_evt_session_result_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_ERROR_EVT,          app_ctrl_evt_soc_error_from_soc, 0);
-    app_uart_register_evt_handler(UART_SOC_ULTRA_EMIT_EVT,      app_ctrl_evt_ultra_emit_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_ULTRA_EMIT_EVT,        app_ctrl_evt_ultra_emit_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_NEW_CALM_RECORD_EVT,   app_ctrl_evt_new_calm_record_from_soc, 0);
 }
 
 void app_ctrl_time_task(void)
@@ -2052,6 +2104,13 @@ void app_ctrl_time_task(void)
     {
         BLE_LOG_D("SOC heartbeat timeout, mark SOC offline");
         g_soc_online = 0;
+    }
+
+    // Clear stuck busy flags (e.g. SOC response was lost)
+    if (g_ctx_calm_record_get.busy && clock_time_exceed(g_ctx_calm_record_get.busy_tick, 3000000))
+    {
+        BLE_LOG_D("[TIMEOUT] CALM_RECORD_GET busy stuck >3s, clearing");
+        g_ctx_calm_record_get.busy = 0;
     }
 
     // Poll state changes and push to APP via EVENT

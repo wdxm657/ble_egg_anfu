@@ -59,6 +59,7 @@ enum
     CTRL_CMD_SOC_SESSION_START      = 0x81,  // SOC 安抚会话开始事件
     CTRL_CMD_SOC_MEASURE_EXEC       = 0x82,  // SOC 措施执行事件
     CTRL_CMD_SOC_SESSION_RESULT     = 0x83,  // SOC 会话结果事件
+    CTRL_CMD_CALM_RECORD_NOTIFY     = 0x84,  // SOC 通知 APP 有安抚记录可用 event [recordCount(1)]
     CTRL_CMD_SOC_LOG_DATA           = 0x85,  // SOC 日志数据事件
     CTRL_CMD_SOC_ERROR              = 0x86,  // SOC 错误通知事件
 
@@ -152,6 +153,13 @@ int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen);
  *          Best-effort: if not connected, the call returns without sending.
  */
 void app_ctrl_text_send_bytes(const u8 *data, u16 len);
+
+/**
+ * @brief   Notify APP that new calm record is available (via TEXT_CHUNK).
+ *          Called on BLE connection or when SOC completes a new record.
+ *          APP decides whether to call CALM_RECORD_GET(0x33) to read the record.
+ */
+void app_ctrl_notify_new_record(void);
 
 static inline void app_ctrl_text_send_str(const char *s)
 {

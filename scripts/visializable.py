@@ -42,6 +42,7 @@ CTRL_CMD_WORK_STATE_CHANGED = 0x80
 CTRL_CMD_SOC_SESSION_START = 0x81
 CTRL_CMD_SOC_MEASURE_EXEC = 0x82
 CTRL_CMD_SOC_SESSION_RESULT = 0x83
+CTRL_CMD_CALM_RECORD_NOTIFY = 0x84  # 安抚记录可用通知 event（设备→APP）
 CTRL_CMD_SOC_ERROR = 0x86
 CTRL_CMD_ULTRA_SET_25K = 0x60
 CTRL_CMD_ULTRA_SET_30K = 0x61
@@ -80,6 +81,7 @@ CMD_NAME = {
     CTRL_CMD_SOC_SESSION_START: "SOC_SESSION_START",
     CTRL_CMD_SOC_MEASURE_EXEC: "SOC_MEASURE_EXEC",
     CTRL_CMD_SOC_SESSION_RESULT: "SOC_SESSION_RESULT",
+    CTRL_CMD_CALM_RECORD_NOTIFY: "CALM_RECORD_NOTIFY",
     CTRL_CMD_SOC_ERROR: "SOC_ERROR",
     CTRL_CMD_ULTRA_SET_25K: "ULTRA_SET_25K",
     CTRL_CMD_ULTRA_SET_30K: "ULTRA_SET_30K",
@@ -259,6 +261,7 @@ class BleController:
         CTRL_CMD_SOC_SESSION_START,
         CTRL_CMD_SOC_MEASURE_EXEC,
         CTRL_CMD_SOC_SESSION_RESULT,
+        CTRL_CMD_CALM_RECORD_NOTIFY,
         CTRL_CMD_SOC_ERROR,
     }
 
@@ -330,12 +333,13 @@ class BleController:
             return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_GET:
             p = frame.payload
-            if len(p) >= 9 and p[0] == 0x00:
-                remaining = p[1]
-                entry_idx = p[2]
-                total_entries = p[3]
-                entry_type = p[4]
-                ts = int.from_bytes(p[5:9], "little", signed=False)
+            # 新格式 12 字节: [status, entryIdx, totalEntries, session_id(4LE), type, ts(4)]
+            if len(p) >= 12 and p[0] == 0x00:
+                entry_idx = p[1]
+                total_entries = p[2]
+                session_id = int.from_bytes(p[3:7], "little", signed=False)
+                entry_type = p[7]
+                ts = int.from_bytes(p[8:12], "little", signed=False)
 
                 type_names = {
                     0x01: "BARK",
@@ -351,16 +355,16 @@ class BleController:
                 return (
                     f"{base} entry {entry_idx}/{total_entries} "
                     f"type=0x{entry_type:02X}({tname}) ts={ts} "
-                    f"remainingRecords={remaining}"
+                    f"session_id={session_id}"
                 )
             if len(p) == 1 and p[0] == 0x00:
                 return f"{base} no records"
             return f"{base} payload={p.hex()}"
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_DELETE:
             p = frame.payload
-            if len(p) >= 2 and p[0] == 0x00:
-                return f"{base} remainingRecords={p[1]}"
-            return f"{base} payload={p.hex()}"
+            if len(p) >= 1 and p[0] == 0x00:
+                return f"{base} OK"
+            return f"{base} status=0x{p[0]:02X}" if p else f"{base} payload empty"
         if frame.cmd_id == CTRL_CMD_UID_GET and len(frame.payload) >= 2:
             return f"{base} payload={frame.payload.hex()}"
 
@@ -404,6 +408,9 @@ class BleController:
             result_str = "成功" if result == 1 else "失败"
             m_name = MainWindow.MEASURE_NAMES.get(ok_measure, f"未知({ok_measure})")
             return f"{base} session_id={sid} result={result}({result_str}) ok_measure={ok_measure}({m_name}) ts={ts_val}"
+
+        if frame.cmd_id == CTRL_CMD_CALM_RECORD_NOTIFY and len(p) >= 1:
+            return f"{base} recordCount={p[0]}"
 
         return f"{base} payload={p.hex()}"
 
@@ -1003,7 +1010,7 @@ class MainWindow(QtWidgets.QWidget):
 
     def _init_record_state(self) -> None:
         self._rec_entries = []       # 当前记录的 entry 列表 [(type, ts_str), ...]
-        self._rec_remaining = 0      # 剩余记录数
+        self._rec_session_id = 0     # 当前记录的 session_id（用于删除）
         self._rec_total = 0          # 本条记录总 entry 数
         self._rec_received = 0       # 已收到 entry 数
 
@@ -1014,7 +1021,9 @@ class MainWindow(QtWidgets.QWidget):
         self._send(CTRL_CMD_CALM_RECORD_GET, b"", "CALM_RECORD_GET")
 
     def _send_record_del(self) -> None:
-        self._send(CTRL_CMD_CALM_RECORD_DELETE, b"", "CALM_RECORD_DELETE")
+        sid = getattr(self, "_rec_session_id", 0)
+        payload = bytes([sid & 0xFF])
+        self._send(CTRL_CMD_CALM_RECORD_DELETE, payload, f"CALM_RECORD_DELETE session_id={sid}")
 
     @staticmethod
     def _record_type_name(t: int) -> str:
@@ -1047,10 +1056,11 @@ class MainWindow(QtWidgets.QWidget):
             self.txt_record_detail.clear()
             return
 
+        # 格式 9 字节: [status, entryIdx, totalEntries, session_id(1), type, ts(4)]
         if len(p) >= 9 and p[0] == 0x00:
-            remaining = p[1]
-            entry_idx = p[2]
-            total_entries = p[3]
+            entry_idx = p[1]
+            total_entries = p[2]
+            session_id = p[3]
             entry_type = p[4]
             ts = int.from_bytes(p[5:9], "little", signed=False)
             ts_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
@@ -1058,9 +1068,9 @@ class MainWindow(QtWidgets.QWidget):
             if entry_idx == 0:
                 self._init_record_state()
                 self._rec_total = total_entries
+                self._rec_session_id = session_id
                 self.txt_record_detail.clear()
 
-            self._rec_remaining = remaining
             self._rec_received = entry_idx + 1
             type_name = self._record_type_name(entry_type)
             self._rec_entries.append((type_name, ts_str))
@@ -1075,7 +1085,7 @@ class MainWindow(QtWidgets.QWidget):
                 lines.append(f"  {icon} [{i}] {tn}  @{ts_s}")
             self.txt_record_detail.setText("\n".join(lines))
 
-            info = f"记录信息：第 {entry_idx+1}/{total_entries} 条, 剩余 {remaining} 条记录"
+            info = f"记录信息：第 {entry_idx+1}/{total_entries} 条, session_id={session_id}"
             if entry_idx + 1 >= total_entries:
                 info += " (记录完整)"
             self.lbl_record_info.setText(info)
@@ -1085,9 +1095,8 @@ class MainWindow(QtWidgets.QWidget):
 
     def _apply_record_del_rsp(self, frame: CtrlFrame) -> None:
         p = frame.payload
-        if len(p) >= 2 and p[0] == 0x00:
-            remaining = p[1]
-            self.lbl_record_info.setText(f"记录信息：已删除，剩余 {remaining} 条记录")
+        if len(p) >= 1 and p[0] == 0x00:
+            self.lbl_record_info.setText("记录信息：已删除")
             self.txt_record_detail.clear()
             self._init_record_state()
             return
