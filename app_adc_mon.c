@@ -441,6 +441,7 @@ void app_adc_mon_poll(void)
         {
             mv_bat_avg = s_mv_bat_sum / s_sample_cnt;
             mv_ntc_avg = s_mv_ntc_sum / s_sample_cnt;
+                BLE_LOG_D("[ADC] mv_bat_avg=%dmV cnt=%d", s_bat_mv, s_sample_cnt);
         }
 
         /* NTC 温度 */

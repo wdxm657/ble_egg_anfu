@@ -17,6 +17,7 @@
 #include "app_ctrl.h"
 #include "app_uart.h"
 #include "app_ultrasonic.h"
+#include "app_adc_mon.h"
 
 #include "app.h"
 
@@ -92,6 +93,7 @@ typedef struct
     u8 measureOrder[3];     // 安抚措施执行顺序: 1=音乐 2=主人录音 3=超声
     u8 usOrderCount;        // 超声执行顺序项数(最多 3)
     u8 usOrder[3];          // 超声执行顺序: 1=25kHz 2=30kHz 3=25&30kHz
+    u8 charging;            // 充电状态: 0=未充电, 1=充电中 (由 BLE MCU 本地维护)
 } app_ctrl_state_t;
 
 static app_ctrl_state_t g_ctrlState = {
@@ -125,20 +127,22 @@ typedef struct
     u8 bleSeq;
 } app_ctrl_ble_req_ctx_t;
 
-/* 上一次推送的状态快照 (9 字节，与 STATUS_GET 响应 payload 一致) */
+/* 上一次推送的状态快照 (10 字节，与 STATUS_GET 响应 payload 一致) */
 /* [0]=status always 0, [1]=powerState, [2]=workState, [3]=btLinked,
-   [4]=ownerVoiceExist, [5]=volume, [6]=calmMode, [7]=enabledMask, [8]=usMask */
-static u8 s_pushed_status[9] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
+   [4]=ownerVoiceExist, [5]=volume, [6]=calmMode, [7]=enabledMask,
+   [8]=usMask, [9]=charging */
+static u8 s_pushed_status[10] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
 /**
- * @brief 检查 g_ctrlState 是否有变化，有则推送 STATUS 事件给 APP。
- *         payload 格式与 STATUS_GET RSP 一致 (9 字节)。
+ * @brief 检查 g_ctrlState + 充电状态是否有变化，有则推送 STATUS 事件给 APP。
+ *         payload 格式与 STATUS_GET RSP 一致 (10 字节)。
+ *         byte[9]=charging 由 BLE MCU 本地通过 ADC 监测获取。
  */
 static void app_ctrl_state_try_push_event(void)
 {
-    u8 cur[9];
+    u8 cur[10];
     cur[0] = CTRL_STATUS_OK;
     cur[1] = g_ctrlState.powerState;
     cur[2] = g_ctrlState.workState;
@@ -148,6 +152,7 @@ static void app_ctrl_state_try_push_event(void)
     cur[6] = g_ctrlState.calmMode;
     cur[7] = g_ctrlState.enabledMask;
     cur[8] = g_ctrlState.usMask;
+    cur[9] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
 
     if (memcmp(s_pushed_status, cur, sizeof(cur)) == 0)
     {
@@ -165,6 +170,7 @@ static void app_ctrl_state_try_push_event(void)
     if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  mode=%d->%d", s_pushed_status[6], cur[6]); changed = 1; }
     if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
     if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[8], cur[8]); changed = 1; }
+    if (cur[9] != s_pushed_status[9]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[9], cur[9]); changed = 1; }
     if (!changed) { BLE_LOG_D("  (none)"); }
 
     memcpy(s_pushed_status, cur, sizeof(cur));
@@ -265,7 +271,7 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         BLE_LOG_D("[SOC_RSP] STATUS_GET too short len=%d", payloadLen);
     }
 
-    u8 rsp[9] = {
+    u8 rsp[10] = {
         CTRL_STATUS_OK,
         g_ctrlState.powerState,
         g_ctrlState.workState,
@@ -275,6 +281,7 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         g_ctrlState.calmMode,
         g_ctrlState.enabledMask,
         g_ctrlState.usMask,
+        app_adc_mon_is_charging(),  /* MCU 本地充电状态 */
     };
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_STATUS_GET, ctx->bleSeq, rsp, sizeof(rsp));
 }

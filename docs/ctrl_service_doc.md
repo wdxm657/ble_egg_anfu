@@ -138,7 +138,7 @@
 | byte5 | `0x00`  | 长度高字节   |
 
 
-**响应帧（设备 → APP），总长 15 字节**
+**响应帧（设备 → APP），总长 16 字节**
 
 
 |        |                   |                                                                     |
@@ -148,7 +148,7 @@
 | byte1  | `0x02`            | RSP                                                                 |
 | byte2  | `0x13`            | STATUS_GET                                                          |
 | byte3  | `seq`             | 与请求一致                                                          |
-| byte4  | `0x09`            | 负载长度 = 9                                                        |
+| byte4  | `0x0A`            | 负载长度 = 10                                                       |
 | byte5  | `0x00`            | 长度高字节                                                          |
 | byte6  | `status`          | 见 §3                                                               |
 | byte7  | `powerState`      | 电源：`0x00`关机，`0x01`开机（**MCU 本地维护**，非 SOC 直传）       |
@@ -159,6 +159,7 @@
 | byte12 | `calmMode`        | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
 | byte13 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
 | byte14 | `usMask`          | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
+| byte15 | `charging`        | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
 
 ---
@@ -1089,7 +1090,7 @@ SOC 端每秒检查一次安抚记录文件，当检测到有已存储的完整�
 当设备运行时状态（电源/工作/录音/音量/模式/使能位等）发生任何变化时，设备主动推送完整状态快照。  
 payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg_type=0x03`。
 
-**事件帧，总长 15 字节**
+**事件帧，总长 16 字节**
 
 
 |        |                 |                                                                     |
@@ -1099,7 +1100,7 @@ payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg
 | byte1  | `0x03`          | EVENT                                                               |
 | byte2  | `0x13`          | CTRL_CMD_STATUS_GET（复用命令 ID，由 msg_type 区分）                |
 | byte3  | `seq`           | 事件序号                                                            |
-| byte4  | `0x09`          | 负载长度 = 9                                                        |
+| byte4  | `0x0A`          | 负载长度 = 10                                                       |
 | byte5  | `0x00`          | 长度高字节                                                          |
 | byte6  | `status`        | `0x00`                                                              |
 | byte7  | `powerState`    | 电源：`0x00`关机，`0x01`开机                                        |
@@ -1110,7 +1111,10 @@ payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg
 | byte12 | `calmMode`      | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
 | byte13 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
 | byte14 | `usMask`        | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
+| byte15 | `charging`      | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
+
+**触发时机**：电源/工作/录音/音量/模式/使能位等任何状态变化，以及 **MCU 充电状态变化（插拔 USB、充满/开始充电）** 均会触发推送。
 
 APP 应在收到此事件后刷新本地缓存的状态展示，无需再次调用 STATUS_GET。
 
