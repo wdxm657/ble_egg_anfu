@@ -154,12 +154,11 @@
 | byte7  | `powerState`      | 电源：`0x00`关机，`0x01`开机（**MCU 本地维护**，非 SOC 直传）       |
 | byte8  | `workState`       | 工作状态：`0x00`OFF，`0x01`监测，`0x02`识别，`0x03`执行，`0x04`休息 |
 | byte9  | `btLinked`        | 兼容字段：当前连接下**固定为** `0x01`                               |
-| byte10 | `ownerVoiceExist` | 主人录音是否存在：`0x00`无，`0x01`有                                |
-| byte11 | `volume`          | 音量 `0`～`100` (百分比)                                             |
-| byte12 | `calmMode`        | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
-| byte13 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
-| byte14 | `usMask`          | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
-| byte15 | `charging`        | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
+| byte10 | `volume`          | 音量 `0`～`100` (百分比)                                             |
+| byte11 | `calmMode`        | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
+| byte12 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
+| byte13 | `usMask`          | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
+| byte14 | `charging`        | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
 
 ---
@@ -1106,12 +1105,11 @@ payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg
 | byte7  | `powerState`    | 电源：`0x00`关机，`0x01`开机                                        |
 | byte8  | `workState`     | 工作状态：`0x00`OFF，`0x01`监测，`0x02`识别，`0x03`执行，`0x04`休息 |
 | byte9  | `btLinked`      | 蓝牙连接状态：当前会话固定 `0x01`                                   |
-| byte10 | `ownerVoiceExist` | 主人录音是否存在：`0x00`无，`0x01`有                              |
-| byte11 | `volume`        | 音量 `0`～`100` (百分比)                                            |
-| byte12 | `calmMode`      | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
-| byte13 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
-| byte14 | `usMask`        | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
-| byte15 | `charging`      | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
+| byte10 | `volume`        | 音量 `0`～`100` (百分比)                                            |
+| byte11 | `calmMode`      | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
+| byte12 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
+| byte13 | `usMask`        | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
+| byte14 | `charging`      | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
 
 **触发时机**：电源/工作/录音/音量/模式/使能位等任何状态变化，以及 **MCU 充电状态变化（插拔 USB、充满/开始充电）** 均会触发推送。

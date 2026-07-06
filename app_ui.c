@@ -63,9 +63,9 @@ void app_ui_led_task(void)
 
     if (charging)
     {
-        /* 充电中 → 绿色闪烁 */
-        gpio_write(GPIO_LED_CHARGE_GREN, g_led_blink_on ? LED_ON_LEVEL : !LED_ON_LEVEL);
-        gpio_write(GPIO_LED_CHARGE_RED,  !LED_ON_LEVEL);
+        /* 充电中 → 红色常亮 */
+        gpio_write(GPIO_LED_CHARGE_GREN, !LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED,  LED_ON_LEVEL);
     }
     else if (bat_percent > 80)
     {

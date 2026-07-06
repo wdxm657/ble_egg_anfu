@@ -128,11 +128,10 @@ typedef struct
 } app_ctrl_ble_req_ctx_t;
 
 /* 上一次推送的状态快照 (10 字节，与 STATUS_GET 响应 payload 一致) */
-/* [0]=status always 0, [1]=powerState, [2]=workState, [3]=btLinked,
-   [4]=ownerVoiceExist, [5]=volume, [6]=calmMode, [7]=enabledMask,
-   [8]=usMask, [9]=charging */
-static u8 s_pushed_status[10] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+/* [0]=status always 0, [1]=powerState, [2]=workState, [3]=btLinked, [4]=volume, [5]=calmMode, [6]=enabledMask,
+   [7]=usMask, [8]=charging */
+static u8 s_pushed_status[9] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 /**
@@ -147,12 +146,11 @@ static void app_ctrl_state_try_push_event(void)
     cur[1] = g_ctrlState.powerState;
     cur[2] = g_ctrlState.workState;
     cur[3] = g_ctrlState.btLinked;
-    cur[4] = g_ctrlState.ownerVoiceExist;
-    cur[5] = g_ctrlState.volume;
-    cur[6] = g_ctrlState.calmMode;
-    cur[7] = g_ctrlState.enabledMask;
-    cur[8] = g_ctrlState.usMask;
-    cur[9] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
+    cur[4] = g_ctrlState.volume;
+    cur[5] = g_ctrlState.calmMode;
+    cur[6] = g_ctrlState.enabledMask;
+    cur[7] = g_ctrlState.usMask;
+    cur[8] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
 
     if (memcmp(s_pushed_status, cur, sizeof(cur)) == 0)
     {
@@ -165,16 +163,16 @@ static void app_ctrl_state_try_push_event(void)
     if (cur[1] != s_pushed_status[1]) { BLE_LOG_D("  power=%d->%d", s_pushed_status[1], cur[1]); changed = 1; }
     if (cur[2] != s_pushed_status[2]) { BLE_LOG_D("  work=%d->%d", s_pushed_status[2], cur[2]); changed = 1; }
     if (cur[3] != s_pushed_status[3]) { BLE_LOG_D("  bt=%d->%d", s_pushed_status[3], cur[3]); changed = 1; }
-    if (cur[4] != s_pushed_status[4]) { BLE_LOG_D("  rec=%d->%d", s_pushed_status[4], cur[4]); changed = 1; }
-    if (cur[5] != s_pushed_status[5]) { BLE_LOG_D("  vol=%d->%d", s_pushed_status[5], cur[5]); changed = 1; }
-    if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  mode=%d->%d", s_pushed_status[6], cur[6]); changed = 1; }
-    if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
-    if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[8], cur[8]); changed = 1; }
-    if (cur[9] != s_pushed_status[9]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[9], cur[9]); changed = 1; }
+    if (cur[4] != s_pushed_status[4]) { BLE_LOG_D("  vol=%d->%d", s_pushed_status[4], cur[4]); changed = 1; }
+    if (cur[5] != s_pushed_status[5]) { BLE_LOG_D("  mode=%d->%d", s_pushed_status[5], cur[5]); changed = 1; }
+    if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[6], cur[6]); changed = 1; }
+    if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
+    if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[8], cur[8]); changed = 1; }
     if (!changed) { BLE_LOG_D("  (none)"); }
 
     memcpy(s_pushed_status, cur, sizeof(cur));
-    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_STATUS_GET, g_ctrlSeq++, cur, sizeof(cur));
+    if(changed)
+        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_STATUS_GET, g_ctrlSeq++, cur, sizeof(cur));
 }
 
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_power_ctrl;
@@ -243,7 +241,6 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         {
             g_ctrlState.workState = payload[2];
             // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
-            g_ctrlState.ownerVoiceExist = payload[4];
             // SOC 已返回 0-100，直接使用
             g_ctrlState.volume = payload[5];
             if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
@@ -271,12 +268,11 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         BLE_LOG_D("[SOC_RSP] STATUS_GET too short len=%d", payloadLen);
     }
 
-    u8 rsp[10] = {
+    u8 rsp[9] = {
         CTRL_STATUS_OK,
         g_ctrlState.powerState,
         g_ctrlState.workState,
         g_ctrlState.btLinked,
-        g_ctrlState.ownerVoiceExist,
         g_ctrlState.volume,
         g_ctrlState.calmMode,
         g_ctrlState.enabledMask,
