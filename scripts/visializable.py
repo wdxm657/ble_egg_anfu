@@ -277,9 +277,9 @@ class BleController:
         status = frame.payload[0] if frame.payload else 0xFF
         status_name = STATUS_NAME.get(status, "UNKNOWN")
         base = f"{base} status=0x{status:02X}({status_name})"
-        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
-            _, pwr, ws, bt, rec, vol, mode, em, um = frame.payload[:9]
-            return f"{base} pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
+        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 8:
+            _, pwr, ws, bt, vol, mode, em, um = frame.payload[:8]
+            return f"{base} pwr={pwr} work={ws} bt={bt} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
         if frame.cmd_id == CTRL_CMD_VOLUME_GET and len(frame.payload) >= 2:
             return f"{base} volume={frame.payload[1]}"
         if frame.cmd_id == CTRL_CMD_OWNER_REC_PLAY and len(frame.payload) >= 1:
@@ -857,8 +857,8 @@ class MainWindow(QtWidgets.QWidget):
         if status != 0x00:
             return
 
-        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
-            _, pwr, ws, bt, rec, vol, mode, enabled_mask, us_mask = frame.payload[:9]
+        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 8:
+            _, pwr, ws, bt, vol, mode, enabled_mask, us_mask = frame.payload[:8]
             self.sp_volume.setValue(int(vol))
             self._set_mode_combo(mode)
             self.chk_music.setChecked(bool(enabled_mask & 0x01))

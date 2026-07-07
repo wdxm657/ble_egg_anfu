@@ -235,28 +235,28 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
 
     if (payloadLen >= 8)
     {
-        // 约定: [status,power,work,bt,ownerRec,volume,calmMode,enabledMask,usMask]
+        // 约定: [status,power,work,bt,volume,calmMode,enabledMask,usMask]
         // 注意: powerState 由 BLE MCU 本地维护，不使用 SOC 上报值覆盖。
         if (payload[0] == 0x00)
         {
             g_ctrlState.workState = payload[2];
             // btLinked 为兼容字段，固定由 MCU 侧返回 1，不从 SOC 回包覆盖。
             // SOC 已返回 0-100，直接使用
-            g_ctrlState.volume = payload[5];
+            g_ctrlState.volume = payload[4];
             if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
-            g_ctrlState.calmMode        = payload[6];
-            g_ctrlState.enabledMask     = payload[7];
-            if (payloadLen >= 9)
+            g_ctrlState.calmMode        = payload[5];
+            g_ctrlState.enabledMask     = payload[6];
+            if (payloadLen >= 8)
             {
-                g_ctrlState.usMask = payload[8];
+                g_ctrlState.usMask = payload[7];
             }
-            BLE_LOG_D("[SOC_RSP] STATUS_GET  work=%d rec=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
+            BLE_LOG_D("[SOC_RSP] STATUS_GET  work=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
                       payload[2],
                       payload[4],
                       payload[5],
                       payload[6],
                       payload[7],
-                      (payloadLen >= 9) ? payload[8] : 0);
+                      (payloadLen >= 8) ? payload[7] : 0);
         }
         else
         {
@@ -1336,7 +1336,7 @@ static void app_ctrl_rsp_volume_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
     if (payloadLen >= 2 && payload[0] == 0x00)
     {
         // SOC 已返回 0-100，直接使用
-        g_ctrlState.volume = payload[1];
+        g_ctrlState.volume = payload[4];
         if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
         BLE_LOG_D("[SOC_RSP] VOLUME_GET pc=%d", g_ctrlState.volume);
         u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.volume};
@@ -2115,6 +2115,8 @@ void app_ctrl_time_task(void)
         BLE_LOG_D("[TIMEOUT] CALM_RECORD_GET busy stuck >3s, clearing");
         g_ctx_calm_record_get.busy = 0;
     }
+
+
 
     // Poll state changes and push to APP via EVENT
     app_ctrl_state_try_push_event();
