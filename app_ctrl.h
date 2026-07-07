@@ -155,6 +155,18 @@ int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen);
 void app_ctrl_text_send_bytes(const u8 *data, u16 len);
 
 /**
+ * @brief   Send log text to PC via dedicated Log TX characteristic (0x03 UUID).
+ *          Best-effort: if not connected, the call returns without sending.
+ */
+void app_ctrl_log_send_bytes(const u8 *data, u16 len);
+
+static inline void app_ctrl_log_send_str(const char *s)
+{
+    if (!s) return;
+    app_ctrl_log_send_bytes((const u8 *)s, (u16)strlen(s));
+}
+
+/**
  * @brief   Notify APP that new calm record is available (via TEXT_CHUNK).
  *          Called on BLE connection or when SOC completes a new record.
  *          APP decides whether to call CALM_RECORD_GET(0x33) to read the record.
@@ -185,7 +197,7 @@ static inline void app_ctrl_text_send_str(const char *s)
     {                                                                                            \
         char _ble_log_buf[128];                                                                  \
         tl_sprintf(_ble_log_buf, "[%s:%d]: " fmt "\r\n", __FILENAME__, __LINE__, ##__VA_ARGS__); \
-        app_ctrl_text_send_bytes((const u8 *)_ble_log_buf, (u16)strlen(_ble_log_buf));           \
+        app_ctrl_log_send_bytes((const u8 *)_ble_log_buf, (u16)strlen(_ble_log_buf));            \
     } while (0)
 #else
 #define BLE_LOG_D(fmt, ...) ((void)0)

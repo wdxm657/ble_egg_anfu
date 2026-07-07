@@ -139,6 +139,12 @@ typedef enum
 	CUSTOM_COUNTER_READ_CCB_H,				//UUID: 2902, 	VALUE: counter CCC
 	CUSTOM_COUNTER_READ_DESC_H,				//UUID: 2901, 	VALUE: read char user description
 
+	// Log TX (0x03 UUID, 用于独立日志输出)
+	CUSTOM_COUNTER_LOG_CD_H,				//UUID: 2803, 	VALUE:  			Prop: read | notify
+	CUSTOM_COUNTER_LOG_DP_H,				//UUID: 03a0..., VALUE: log data
+	CUSTOM_COUNTER_LOG_CCB_H,				//UUID: 2902, 	VALUE: log CCC
+	CUSTOM_COUNTER_LOG_DESC_H,				//UUID: 2901, 	VALUE: log char user description
+
 
 
 	ATT_END_H,

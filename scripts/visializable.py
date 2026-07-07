@@ -146,6 +146,26 @@ CTRL_TX_RAW_BYTES = bytes(
         0x00,
     ]
 )
+CTRL_LOG_RAW_BYTES = bytes(
+    [
+        0x03,
+        0xA0,
+        0x0D,
+        0x0C,
+        0x0B,
+        0x0A,
+        0x09,
+        0x08,
+        0x07,
+        0x06,
+        0x05,
+        0x04,
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+    ]
+)
 
 
 @dataclass
@@ -414,6 +434,21 @@ class BleController:
 
         return f"{base} payload={p.hex()}"
 
+    def _handle_log_notify(self, raw: bytes) -> None:
+        """接收 Log TX 特征通知，按行缓冲输出"""
+        if not hasattr(self, '_log_buf'):
+            self._log_buf = b''
+        self._log_buf += raw
+        while b'\n' in self._log_buf:
+            line, self._log_buf = self._log_buf.split(b'\n', 1)
+            line = line.rstrip(b'\r')
+            if line:
+                try:
+                    text = line.decode("utf-8", errors="replace")
+                    self._log(f"[LOG] {text}")
+                except Exception:
+                    self._log(f"[LOG][RAW] {line.hex()}")
+
     def _handle_notify(self, raw: bytes) -> None:
         frame = parse_ctrl_frame(raw)
         if not frame:
@@ -469,6 +504,7 @@ class BleController:
                     await _bleak_ensure_gatt_ready(client)
                     tx_char = _find_char(client, _uuid_candidates(CTRL_TX_RAW_BYTES))
                     rx_char = _find_char(client, _uuid_candidates(CTRL_RX_RAW_BYTES))
+                    log_char = _find_char(client, _uuid_candidates(CTRL_LOG_RAW_BYTES))
                     if not tx_char or not rx_char:
                         self._log("[BLE] Ctrl RX/TX 特征未找到")
                         continue
@@ -477,6 +513,15 @@ class BleController:
                         self._handle_notify(bytes(data))
 
                     await client.start_notify(tx_char, _on_notify)
+
+                    if log_char:
+                        def _on_log_notify(_h, data: bytearray):
+                            self._handle_log_notify(bytes(data))
+                        await client.start_notify(log_char, _on_log_notify)
+                        self._log("[BLE] Log TX 特征已订阅")
+                    else:
+                        self._log("[BLE] Log TX 特征未找到")
+
                     self.connected = True
                     self._log("[BLE] connected")
                     while client.is_connected and not self.stop_event.is_set():
@@ -499,6 +544,8 @@ class BleController:
                     self.connected = False
                     try:
                         await client.stop_notify(tx_char)
+                        if log_char:
+                            await client.stop_notify(log_char)
                     except Exception:
                         pass
                     self._log("[BLE] disconnected")

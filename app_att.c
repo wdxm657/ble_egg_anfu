@@ -227,12 +227,18 @@ static const u8  my_OtaName[] = {'O', 'T', 'A'};
 #define CUSTOM_CTRL_RX_CHAR_UUID   		0x01,0xa0,0x0d,0x0c,0x0b,0x0a,0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0x00
 // Custom TX Characteristic UUID (Device -> APP)
 #define CUSTOM_CTRL_TX_CHAR_UUID   		0x02,0xa0,0x0d,0x0c,0x0b,0x0a,0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0x00
+// Custom Log TX Characteristic UUID (Device -> APP, 独立日志通道)
+#define CUSTOM_CTRL_LOG_CHAR_UUID   	0x03,0xa0,0x0d,0x0c,0x0b,0x0a,0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0x00
 
 static const u8 my_CustomCtrlServiceUUID[16]	= WRAPPING_BRACES(CUSTOM_CTRL_SERVICE_UUID);
 static const u8 my_CustomCtrlRxUUID[16]	        = WRAPPING_BRACES(CUSTOM_CTRL_RX_CHAR_UUID);
 static const u8 my_CustomCtrlTxUUID[16]	        = WRAPPING_BRACES(CUSTOM_CTRL_TX_CHAR_UUID);
+static const u8 my_CustomCtrlLogUUID[16]	    = WRAPPING_BRACES(CUSTOM_CTRL_LOG_CHAR_UUID);
 
 static u8 customCtrlTxCCC[2] = {0, 0};  // Client Characteristic Configuration for TX notify
+u8 customCtrlLogCCC[2] = {0, 0}; // Client Characteristic Configuration for Log TX notify
+static u8 customCtrlLogVal[1] = {0};    // Log TX value buffer
+static const u8 my_CustomCtrlLogName[] = {'L','o','g',' ','T','X'};
 
 // User Description strings for characteristics
 static const u8 my_CustomCtrlRxName[] = {'C','t','r','l',' ','R','X'};
@@ -350,6 +356,12 @@ static const u8 my_customCtrlTxCharVal[19] = {
 	CHAR_PROP_READ | CHAR_PROP_NOTIFY,
 	U16_LO(CUSTOM_COUNTER_READ_DP_H), U16_HI(CUSTOM_COUNTER_READ_DP_H),
 	CUSTOM_CTRL_TX_CHAR_UUID,
+};
+
+static const u8 my_customCtrlLogCharVal[19] = {
+	CHAR_PROP_READ | CHAR_PROP_NOTIFY,
+	U16_LO(CUSTOM_COUNTER_LOG_DP_H), U16_HI(CUSTOM_COUNTER_LOG_DP_H),
+	CUSTOM_CTRL_LOG_CHAR_UUID,
 };
 
 #if (BLE_OTA_SERVER_ENABLE)
@@ -492,7 +504,7 @@ static const attribute_t my_Attributes[] = {
 
 	////////////////////////////////////// Custom Control Service /////////////////////////////////////////////////////
 	//  attributes: service, rx char prop, rx value, rx desc, tx char prop, tx value, tx CCC, tx desc
-	{8,ATT_PERMISSIONS_READ, 2,16,(u8*)(&my_primaryServiceUUID), 	(u8*)(&my_CustomCtrlServiceUUID), 0},
+	{12,ATT_PERMISSIONS_READ, 2,16,(u8*)(&my_primaryServiceUUID), 	(u8*)(&my_CustomCtrlServiceUUID), 0},
 	{0,ATT_PERMISSIONS_READ, 2, sizeof(my_customCtrlRxCharVal),(u8*)(&my_characterUUID), (u8*)(my_customCtrlRxCharVal), 0},				// RX char prop
 	{0,ATT_PERMISSIONS_RDWR,16,CTRL_RX_MAX_LEN,(u8*)(&my_CustomCtrlRxUUID),	(u8*)(g_ctrlRxBuf), &customCounterWrite, NULL},			// RX char value
 	{0,ATT_PERMISSIONS_READ, 2,sizeof (my_CustomCtrlRxName),(u8*)(&userdesc_UUID), (u8*)(my_CustomCtrlRxName), 0},	// RX user desc
@@ -500,6 +512,10 @@ static const attribute_t my_Attributes[] = {
 	{0,ATT_PERMISSIONS_READ,16,CTRL_TX_MAX_LEN,(u8*)(&my_CustomCtrlTxUUID),	(u8*)(g_ctrlTxBuf), NULL, NULL},			// TX char value
 	{0,ATT_PERMISSIONS_RDWR,2,sizeof(customCtrlTxCCC),(u8*)(&clientCharacterCfgUUID), 	(u8*)(customCtrlTxCCC), 0},	// TX CCC
 	{0,ATT_PERMISSIONS_READ, 2,sizeof (my_CustomCtrlTxName),(u8*)(&userdesc_UUID), (u8*)(my_CustomCtrlTxName), 0},	// TX user desc
+	{0,ATT_PERMISSIONS_READ, 2, sizeof(my_customCtrlLogCharVal),(u8*)(&my_characterUUID), (u8*)(my_customCtrlLogCharVal), 0},			// LOG char prop
+	{0,ATT_PERMISSIONS_READ,16,sizeof(customCtrlLogVal),(u8*)(&my_CustomCtrlLogUUID), (u8*)(customCtrlLogVal), NULL, NULL},			// LOG char value
+	{0,ATT_PERMISSIONS_RDWR,2,sizeof(customCtrlLogCCC),(u8*)(&clientCharacterCfgUUID), (u8*)(customCtrlLogCCC), 0},	// LOG CCC
+	{0,ATT_PERMISSIONS_READ, 2,sizeof (my_CustomCtrlLogName),(u8*)(&userdesc_UUID), (u8*)(my_CustomCtrlLogName), 0},	// LOG user desc
 };
 
 

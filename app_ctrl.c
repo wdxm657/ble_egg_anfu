@@ -31,6 +31,9 @@ u8 g_ble_connected = 0;
 // simple sequence generator for events/async notifications
 static u8 g_ctrlSeq = 0;
 
+// Log TX CCC from app_att.c
+extern u8 customCtrlLogCCC[2];
+
 // ===================== SOC online tracking via heartbeat =====================
 // SOC sends heartbeat every ~2s; if missing for SOC_HEARTBEAT_TIMEOUT_US, mark offline.
 #define SOC_HEARTBEAT_TIMEOUT_US 7000000  // 7 s (tolerates ~3 lost beats)
@@ -1051,6 +1054,46 @@ static void app_ctrl_rsp_owner_rec_save_from_soc(u8 cmdId, u8 seq, const u8 *pay
     }
 }
 
+// ----------------------- response cache for duplicate seq -----------------------
+#define RESP_CACHE_SIZE 4
+typedef struct
+{
+    u8  used;
+    u8  frame[CTRL_TX_MAX_LEN];
+    u8  len;
+} resp_cache_entry_t;
+
+static resp_cache_entry_t g_resp_cache[RESP_CACHE_SIZE];
+static u8 g_resp_cache_idx = 0;
+
+static void resp_cache_save(const u8 *frame, u8 len, u8 seq)
+{
+    resp_cache_entry_t *e = &g_resp_cache[g_resp_cache_idx];
+    e->used = 1;
+    e->len  = (len <= CTRL_TX_MAX_LEN) ? len : CTRL_TX_MAX_LEN;
+    memcpy(e->frame, frame, e->len);
+    g_resp_cache_idx = (g_resp_cache_idx + 1) % RESP_CACHE_SIZE;
+}
+
+static int resp_cache_resend(u8 cmdId, u8 seq)
+{
+    for (u8 i = 0; i < RESP_CACHE_SIZE; i++)
+    {
+        if (g_resp_cache[i].used &&
+            g_resp_cache[i].frame[2] == cmdId &&
+            g_resp_cache[i].frame[3] == seq)
+        {
+            if (BLS_CONN_HANDLE != 0xFFFF)
+            {
+                blc_gatt_pushHandleValueNotify(BLS_CONN_HANDLE, CUSTOM_COUNTER_READ_DP_H,
+                                               g_resp_cache[i].frame, g_resp_cache[i].len);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // ----------------------- sending -----------------------
 int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
 {
@@ -1085,10 +1128,14 @@ int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
         // tl_printf("\r\n");
     }
 #endif
-    sleep_us(10000);
     if (BLS_CONN_HANDLE != 0xFFFF)
     {
         blc_gatt_pushHandleValueNotify(BLS_CONN_HANDLE, CUSTOM_COUNTER_READ_DP_H, g_ctrlTxBuf, totalLen);
+    }
+    /* 缓存 RSP 帧用于重复 seq 重发 */
+    if (msgType == CTRL_MSG_TYPE_RSP)
+    {
+        resp_cache_save(g_ctrlTxBuf, (u8)totalLen, seq);
     }
     // memset(g_ctrlRxBuf, 0, sizeof(g_ctrlRxBuf));
     // memset(g_ctrlTxBuf, 0, sizeof(g_ctrlTxBuf));
@@ -1143,7 +1190,28 @@ void app_ctrl_text_send_bytes(const u8 *data, u16 len)
             sleep_us(5000);
         }
     }
-    sleep_us(10000);
+    // sleep_us(10000);
+}
+
+// ----------------------- log output via dedicated Log TX characteristic (0x03 UUID) -----------------------
+// Send raw bytes directly via notify on the Log TX handle (no protocol framing).
+void app_ctrl_log_send_bytes(const u8 *data, u16 len)
+{
+    if (!data || len == 0) return;
+    if (BLS_CONN_HANDLE == 0xFFFF) return;
+    if (!(customCtrlLogCCC[0] & 0x01)) return;  // Notify not enabled by peer
+
+    /* 分片发送，每片最多 20 字节（MTU=23 时 ATT 有效负载上限）*/
+    u16 maxChunk = 20;
+    u16 offset   = 0;
+    while (offset < len)
+    {
+        u16 chunkLen = (len - offset > maxChunk) ? maxChunk : (u16)(len - offset);
+        blc_gatt_pushHandleValueNotify(BLS_CONN_HANDLE, CUSTOM_COUNTER_LOG_DP_H,
+                                       (u8 *)&data[offset], chunkLen);
+        offset += chunkLen;
+        if (offset < len) sleep_us(5000);
+    }
 }
 
 static void app_ctrl_rsp_power_ctrl_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
@@ -2155,6 +2223,23 @@ void app_ctrl_onRx(u8 *data, u16 len)
         u8 rsp[2] = {CTRL_STATUS_LEN_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, cmdId, seq, rsp, sizeof(rsp));
         return;
+    }
+
+    /* 重复 seq 检测：相同 seq 表示 APP 重发，回复上次缓存的响应 */
+    {
+        static u8 s_last_seq = 0xFF;
+        if (seq == s_last_seq)
+        {
+            BLE_LOG_D("[DUP_SEQ] cmd=0x%02x seq=%d resend cached response", cmdId, seq);
+            if (!resp_cache_resend(cmdId, seq))
+            {
+                /* 缓存未命中，回退到简单的 OK */
+                u8 rsp[1] = {CTRL_STATUS_OK};
+                app_ctrl_send(CTRL_MSG_TYPE_RSP, cmdId, seq, rsp, sizeof(rsp));
+            }
+            return;
+        }
+        s_last_seq = seq;
     }
 
     u8 *payload = &data[6];
