@@ -2158,12 +2158,13 @@ void app_ctrl_time_task(void)
         g_ultra_stop_tick = 0;
     }
 
-    /* 每 3 秒向 SOC 同步 MCU 状态（蓝牙连接 + 电源），SOC 重启后可自动恢复 */
+    /* 每 1 秒向 SOC 同步 MCU 状态（蓝牙连接 + 电源），SOC 重启后可自动恢复 */
     {
         static u32 s_last_sync = 0;
-        if (s_last_sync == 0 || clock_time_exceed(s_last_sync, 3000000))
+        u32 now = clock_time();
+        if (s_last_sync == 0 || clock_time_exceed(s_last_sync, 1000000))
         {
-            s_last_sync = clock_time();
+            s_last_sync = now;
             u8 payload[2];
             payload[0] = g_ble_connected;
             payload[1] = g_ctrlState.powerState;
