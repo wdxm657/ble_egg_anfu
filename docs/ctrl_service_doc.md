@@ -77,17 +77,27 @@
 
 #### 3.1 SOC 原始故障码（当 `status = 0x07` 时，`errDetail` 取值）
 
-当 BLE MCU 返回 `SOC_ERROR(0x07)` 时，`errDetail` 字节为 SOC 侧返回的原始状态码，取值如下：
+当 BLE MCU 返回 `SOC_ERROR(0x07)` 时，`errDetail` 字节为 SOC 侧返回的原始状态码（`ds_uart_status_t`），取值如下：
 
-| errDetail | SOC 侧含义                     |
-| --------- | ------------------------------ |
-| `0x00`    | SOC 返回成功（不应作为错误出现）|
-| `0x01`    | 参数错误                       |
-| `0x02`    | 忙                             |
-| `0x03`    | 状态冲突（当前不允许该操作）   |
-| `0x04`    | 超时                           |
-| `0x05`    | 未找到（如无主人录音文件）     |
-| `0x06`    | SOC 内部错误                   |
+| errDetail | 枚举名                          | 含义                           |
+| --------- | ------------------------------- | ------------------------------ |
+| `0x00`    | `DS_UART_STATUS_OK`             | 成功        |
+| `0x01`    | `DS_UART_STATUS_PARAM_ERROR`    | 参数错误                       |
+| `0x02`    | `DS_UART_STATUS_BUSY`           | 忙                             |
+| `0x03`    | `DS_UART_STATUS_STATE_CONFLICT` | 状态冲突（当前不允许该操作）    |
+| `0x04`    | `DS_UART_STATUS_TIMEOUT`        | 超时                           |
+| `0x05`    | `DS_UART_STATUS_NOT_FOUND`      | 未找到（如无主人录音文件）      |
+| `0x06`    | `DS_UART_STATUS_INTERNAL_ERROR` | SOC 内部错误                   |
+
+> **安抚会话中禁止的操作**：当设备处于安抚流程中（从首次狗叫识别到冷却开始），以下命令会被 SOC 拒绝并返回 `status=0x07(SOC_ERROR)` + `errDetail=0x03(状态冲突)`：
+> - `OWNER_REC_START(0x20)` — 主人录音开始
+> - `OWNER_REC_STOP(0x21)` — 主人录音结束
+> - `OWNER_REC_PLAY(0x22)` — 主人录音播放
+> - `OWNER_REC_DELETE(0x23)` — 主人录音删除
+> - `CALM_MODE_SET(0x30)` — 安抚模式设置
+> - `CALM_STRATEGY_SET(0x37)` — 安抚策略设置
+>
+> APP 应在收到此错误后提示用户「安抚进行中，请稍后重试」。
 
 ---
 
