@@ -93,7 +93,9 @@
 > - `OWNER_REC_START(0x20)` — 主人录音开始
 > - `OWNER_REC_STOP(0x21)` — 主人录音结束
 > - `OWNER_REC_PLAY(0x22)` — 主人录音播放
+> - `OWNER_REC_PLAY_STOP(0x25)` — 主人录音停止播放
 > - `OWNER_REC_DELETE(0x23)` — 主人录音删除
+> - `OWNER_REC_SAVE(0x26)` — 主人录音保存
 > - `CALM_MODE_SET(0x30)` — 安抚模式设置
 > - `CALM_STRATEGY_SET(0x37)` — 安抚策略设置
 >

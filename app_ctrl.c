@@ -423,8 +423,9 @@ static void app_ctrl_rsp_owner_rec_stop_from_soc(u8 cmdId, u8 seq, const u8 *pay
         }
     }
 
-    BLE_LOG_D("[SOC_RSP] OWNER_REC_STOP unexpected status=0x%02x", payloadLen ? payload[0] : 0xFF);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    u8 err = (payloadLen >= 1) ? payload[0] : 0;
+    BLE_LOG_D("[SOC_RSP] OWNER_REC_STOP unexpected status=0x%02x", err);
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_STOP, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
@@ -456,8 +457,9 @@ static void app_ctrl_rsp_owner_rec_play_from_soc(u8 cmdId, u8 seq, const u8 *pay
         }
     }
 
-    BLE_LOG_D("[SOC_RSP] OWNER_REC_PLAY failed soc_status=0x%02x", payloadLen ? payload[0] : 0xFF);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, 0};
+    u8 err = (payloadLen >= 1) ? payload[0] : 0;
+    BLE_LOG_D("[SOC_RSP] OWNER_REC_PLAY failed soc_status=0x%02x", err);
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
@@ -481,7 +483,7 @@ static void app_ctrl_rsp_owner_rec_play_stop_from_soc(u8 cmdId, u8 seq, const u8
 
     u8 err = (payloadLen >= 1) ? payload[0] : 0;
     BLE_LOG_D("[SOC_RSP] OWNER_REC_PLAY_STOP failed soc_status=0x%02x", err);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_PLAY_STOP, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
@@ -810,7 +812,7 @@ static void app_ctrl_rsp_calm_mode_set_from_soc(u8 cmdId, u8 seq, const u8 *payl
 
     u8 err = (payloadLen >= 1) ? payload[0] : 0;
     BLE_LOG_D("[SOC_RSP] CALM_MODE_SET failed soc_status=0x%02x", err);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MODE_SET, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
@@ -834,7 +836,7 @@ static void app_ctrl_rsp_calm_strategy_set_from_soc(u8 cmdId, u8 seq, const u8 *
 
     u8 err = (payloadLen >= 1) ? payload[0] : 0;
     BLE_LOG_D("[SOC_RSP] CALM_STRATEGY_SET failed soc_status=0x%02x", err);
-    u8 rsp[2] = {CTRL_STATUS_INTERNAL_ERROR, err};
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, ctx->bleSeq, rsp, sizeof(rsp));
 }
 
