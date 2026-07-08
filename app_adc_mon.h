@@ -53,6 +53,11 @@ u8  app_adc_mon_get_bat_percent_exact(void);
 u8  app_adc_mon_is_bat_percent_stable(void);
 
 /**
+ * @brief     USB是否插入
+ */
+u8  app_adc_mon_is_usb_det(void);
+
+/**
  * @brief     是否正在充电
  */
 u8  app_adc_mon_is_charging(void);

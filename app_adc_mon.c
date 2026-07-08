@@ -413,7 +413,7 @@ void app_adc_mon_init(void)
 void app_adc_mon_poll(void)
 {
     u32 now = clock_time();
-
+    u8 raw = 0;
     if (s_adc_sample_tick == 0) s_adc_sample_tick = now;
     if (s_adc_report_tick == 0) s_adc_report_tick = now;
 
@@ -455,11 +455,12 @@ void app_adc_mon_poll(void)
         }
 
         /* 电池电压: 分压 660k/100k → 实际电压 = ADC * 6.6 */
-        mv_bat_avg = (mv_bat_avg * 66u + 5u) / 10u;
+        // 当前设备固定+130mv=真实电压
+        u16 _mv_bat_avg = (mv_bat_avg * 66u + 5u) / 10u + 130;
 
-        u8 is_charging      = app_adc_mon_is_charging();
-        u8 bat_percent_raw  = bat_percent_from_mv((u16)mv_bat_avg);
-
+        u8 is_charging      = app_adc_mon_is_usb_det();
+        u8 bat_percent_raw  = bat_percent_from_mv((u16)_mv_bat_avg);
+        raw = bat_percent_raw;
         /* ADC 初始化 5s 前使用 Flash 上次电量，避免 raw 不稳定 */
         if (clock_time_exceed(s_adc_init_tick, APP_BAT_PERCENT_STABLE_US))
         {
@@ -482,17 +483,17 @@ void app_adc_mon_poll(void)
             s_bat_percent = bat_percent_raw;
         }
 
-        s_bat_mv = (mv_bat_avg > 0xFFFFu) ? 0xFFFFu : (u16)mv_bat_avg;
+        s_bat_mv = (_mv_bat_avg > 0xFFFFu) ? 0xFFFFu : (u16)_mv_bat_avg;
 
         /* 每秒日志 */
-        // if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
-        // {
-        //     s_log_tick = now;
-        //     if (s_ntc_temp_valid)
-        //         BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=%dC charge=%d", s_bat_mv, s_bat_percent, s_ntc_temp_c, is_charging);
-        //     else
-        //         BLE_LOG_D("[ADC] bat=%dmV(%d) ntc=INVALID charge=%d", s_bat_mv, s_bat_percent, is_charging);
-        // }
+        if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
+        {
+            s_log_tick = now;
+            if (s_ntc_temp_valid)
+                BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=%dC charge=%d", s_bat_mv,raw, s_bat_percent,mv_bat_avg, s_ntc_temp_c, is_charging);
+            else
+                BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=INVALID charge=%d", s_bat_mv, raw,s_bat_percent,mv_bat_avg, is_charging);
+        }
 
         /* 温控充电管理 */
         app_adc_mon_temp_charge_manage();
@@ -526,6 +527,11 @@ u8 app_adc_mon_get_bat_percent_exact(void)
 u8 app_adc_mon_is_bat_percent_stable(void)
 {
     return (s_bat_percent_inited && clock_time_exceed(s_adc_init_tick, APP_BAT_PERCENT_STABLE_US)) ? 1 : 0;
+}
+
+u8 app_adc_mon_is_usb_det(void)
+{
+    return (s_usb_det_stable == 1) ? 1 : 0;
 }
 
 u8 app_adc_mon_is_charging(void)

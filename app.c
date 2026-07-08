@@ -969,12 +969,12 @@ void main_loop(void)
     ////////////////////////////////////// BLE entry /////////////////////////////////
     blc_sdk_main_loop();
 
-    u8 bat_percent_now = app_adc_mon_get_bat_percent();
+    u8 bat_percent_now = app_adc_mon_get_bat_percent_exact();
     {
         if (bat_percent_now != s_bat_percent_last_reported)
         {
             s_bat_percent_last_reported = bat_percent_now;
-            // BLE_LOG_D("bat: %d", bat_percent_now);
+            BLE_LOG_D("bat: %d", bat_percent_now);
             app_att_battery_update(bat_percent_now);
         }
     }

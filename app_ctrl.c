@@ -162,7 +162,6 @@ static void app_ctrl_state_try_push_event(void)
 
     /* 逐字段对比，仅打印变化的字段 */
     u8 changed = 0;
-    BLE_LOG_D("[STATE_PUSH] changed:");
     if (cur[1] != s_pushed_status[1]) { BLE_LOG_D("  power=%d->%d", s_pushed_status[1], cur[1]); changed = 1; }
     if (cur[2] != s_pushed_status[2]) { BLE_LOG_D("  work=%d->%d", s_pushed_status[2], cur[2]); changed = 1; }
     if (cur[3] != s_pushed_status[3]) { BLE_LOG_D("  bt=%d->%d", s_pushed_status[3], cur[3]); changed = 1; }
@@ -171,11 +170,14 @@ static void app_ctrl_state_try_push_event(void)
     if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[6], cur[6]); changed = 1; }
     if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
     if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[8], cur[8]); changed = 1; }
-    if (!changed) { BLE_LOG_D("  (none)"); }
 
     memcpy(s_pushed_status, cur, sizeof(cur));
-    if(changed)
+    if(changed) {
         app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_STATUS_GET, g_ctrlSeq++, cur, sizeof(cur));
+        /* 状态变化时同步触发电池电量上报（走标准 Battery Service 特征）*/
+        u8 bat = app_adc_mon_get_bat_percent_exact();
+        app_att_battery_update(bat);
+    }
 }
 
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t g_ctx_power_ctrl;
@@ -323,8 +325,8 @@ static void app_ctrl_rsp_calm_mode_get_from_soc(u8 cmdId, u8 seq, const u8 *payl
 
     if (payloadLen >= 7 && payload[0] == 0x00)
     {
-        // 复用 STATUS_GET 回包: [status,power,work,bt,ownerRec,volume,calmMode,enabledMask,usMask]
-        g_ctrlState.calmMode = payload[6];
+        // 复用 STATUS_GET 回包: [status,power,work,bt,volume,calmMode,enabledMask,usMask]
+        g_ctrlState.calmMode = payload[5];
         BLE_LOG_D("[SOC_RSP] CALM_MODE_GET mode=%d", g_ctrlState.calmMode);
     }
     else
@@ -2156,15 +2158,16 @@ void app_ctrl_time_task(void)
         g_ultra_stop_tick = 0;
     }
 
-    /* 每秒轮询蓝牙连接状态并通知 SOC（SOC 重启后可恢复正确灯色）*/
+    /* 每 3 秒向 SOC 同步 MCU 状态（蓝牙连接 + 电源），SOC 重启后可自动恢复 */
     {
-        static u8 s_last_bt = 0xFF;
-        u8 now_bt = g_ble_connected;
-        if (now_bt != s_last_bt)
+        static u32 s_last_sync = 0;
+        if (s_last_sync == 0 || clock_time_exceed(s_last_sync, 3000000))
         {
-            s_last_bt = now_bt;
-            app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, &now_bt, 1, NULL);
-            BLE_LOG_D("[BT_POLL] linked=%d", now_bt);
+            s_last_sync = clock_time();
+            u8 payload[2];
+            payload[0] = g_ble_connected;
+            payload[1] = g_ctrlState.powerState;
+            app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, payload, 2, NULL);
         }
     }
 

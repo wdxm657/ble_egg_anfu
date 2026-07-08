@@ -167,6 +167,9 @@ CTRL_LOG_RAW_BYTES = bytes(
     ]
 )
 
+# 标准 Battery Level 特征 UUID
+BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
+
 
 @dataclass
 class CtrlFrame:
@@ -247,6 +250,8 @@ class BleController:
         self.connected = False
         self.seq = 0
         self._chunk_sessions: Dict[int, Dict[str, object]] = {}
+        self._bat_percent = 0
+        self._charging = 0
 
     def _log(self, line: str) -> None:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -297,6 +302,10 @@ class BleController:
         status = frame.payload[0] if frame.payload else 0xFF
         status_name = STATUS_NAME.get(status, "UNKNOWN")
         base = f"{base} status=0x{status:02X}({status_name})"
+        if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 9:
+            _, pwr, ws, bt, vol, mode, em, um, chg = frame.payload[:9]
+            chg_str = "充电中" if chg else ""
+            return f"{base} pwr={pwr} work={ws} bt={bt} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X} {chg_str}"
         if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 8:
             _, pwr, ws, bt, vol, mode, em, um = frame.payload[:8]
             return f"{base} pwr={pwr} work={ws} bt={bt} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
@@ -434,6 +443,11 @@ class BleController:
 
         return f"{base} payload={p.hex()}"
 
+    def _handle_bat_notify(self, raw: bytes) -> None:
+        """接收 Battery Level 特征通知"""
+        if len(raw) >= 1:
+            self._bat_percent = raw[0]
+
     def _handle_log_notify(self, raw: bytes) -> None:
         """接收 Log TX 特征通知，按行缓冲输出"""
         if not hasattr(self, '_log_buf'):
@@ -505,6 +519,12 @@ class BleController:
                     tx_char = _find_char(client, _uuid_candidates(CTRL_TX_RAW_BYTES))
                     rx_char = _find_char(client, _uuid_candidates(CTRL_RX_RAW_BYTES))
                     log_char = _find_char(client, _uuid_candidates(CTRL_LOG_RAW_BYTES))
+                    bat_char = None
+                    for svc in client.services:
+                        for ch in svc.characteristics:
+                            if str(ch.uuid).lower() == BATTERY_LEVEL_UUID.lower():
+                                bat_char = ch
+                                break
                     if not tx_char or not rx_char:
                         self._log("[BLE] Ctrl RX/TX 特征未找到")
                         continue
@@ -521,6 +541,14 @@ class BleController:
                         self._log("[BLE] Log TX 特征已订阅")
                     else:
                         self._log("[BLE] Log TX 特征未找到")
+
+                    if bat_char:
+                        def _on_bat_notify(_h, data: bytearray):
+                            self._handle_bat_notify(bytes(data))
+                        await client.start_notify(bat_char, _on_bat_notify)
+                        self._log("[BLE] Battery 特征已订阅")
+                    else:
+                        self._log("[BLE] Battery 特征未找到")
 
                     self.connected = True
                     self._log("[BLE] connected")
@@ -579,6 +607,8 @@ class MainWindow(QtWidgets.QWidget):
         conn.addWidget(btn_conn)
         conn.addWidget(btn_disconn)
         conn.addWidget(self.status)
+        self.lbl_charging = QtWidgets.QLabel("")
+        conn.addWidget(self.lbl_charging)
         root.addLayout(conn)
 
         grid = QtWidgets.QGridLayout()
@@ -870,6 +900,15 @@ class MainWindow(QtWidgets.QWidget):
                 self.log.verticalScrollBar().maximum()
             )
         self.status.setText("已连接" if self.ctrl.connected else "未连接")
+        # 每 tick 刷新电池显示
+        bat = getattr(self.ctrl, '_bat_percent', 0)
+        chg = getattr(self.ctrl, '_charging', 0)
+        icon = self._battery_icon(bat, chg)
+        self.lbl_charging.setText(f"{icon} {bat}%")
+        if chg:
+            self.lbl_charging.setStyleSheet("color: #00FF00; font-weight: bold;")
+        else:
+            self.lbl_charging.setStyleSheet("color: #FFFFFF;")
 
     def _flush_rsp_frames(self) -> None:
         while True:
@@ -911,13 +950,16 @@ class MainWindow(QtWidgets.QWidget):
             self.chk_music.setChecked(bool(enabled_mask & 0x01))
             self.chk_owner.setChecked(bool(enabled_mask & 0x02))
             self.chk_us.setChecked(bool(enabled_mask & 0x04))
-            # self.lbl_strategy_query.setText(
-            #     f"策略镜像：enabledMask=0x{enabled_mask:02X} usMask=0x{us_mask:02X}"
-            # )
-            # self.lbl_status_query.setText(
-            #     f"状态查询结果：pwr={pwr} work={ws} bt={bt} rec={rec} vol={vol} mode={mode} "
-            #     f"enabledMask=0x{enabled_mask:02X} usMask=0x{us_mask:02X}"
-            # )
+            # 充电状态（byte8），电池百分比来自标准 Battery Service
+            chg = frame.payload[8] if len(frame.payload) >= 9 else 0
+            self.ctrl._charging = chg
+            bat = getattr(self.ctrl, '_bat_percent', 0)
+            icon = self._battery_icon(bat, chg)
+            self.lbl_charging.setText(f"{icon} {bat}%")
+            if chg:
+                self.lbl_charging.setStyleSheet("color: #00FF00; font-weight: bold;")
+            else:
+                self.lbl_charging.setStyleSheet("color: #FFFFFF;")
             return
 
         if frame.cmd_id == CTRL_CMD_CALM_MODE_GET and len(frame.payload) >= 2:
@@ -1085,6 +1127,16 @@ class MainWindow(QtWidgets.QWidget):
             0x11: "FAIL",
         }
         return names.get(t, f"UNKNOWN(0x{t:02X})")
+
+    @staticmethod
+    def _battery_icon(percent: int, charging: bool) -> str:
+        if charging:
+            return "🔌"
+        if percent >= 80:
+            return "🟢"
+        if percent >= 30:
+            return "🟡"
+        return "🔴"
 
     def _set_mode_combo(self, mode: int) -> None:
         idx = self.cmb_mode.findData(int(mode))
