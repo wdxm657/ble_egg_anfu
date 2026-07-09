@@ -202,5 +202,6 @@ static inline void app_ctrl_text_send_str(const char *s)
 #else
 #define BLE_LOG_D(fmt, ...) ((void)0)
 #endif
+u8 get_work_state();
 
 #endif /* APP_CTRL_H_ */

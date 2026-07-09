@@ -26,21 +26,14 @@
 /**
  *  @brief  Feature select in BLE Sample project
  */
-#define FLASH_SIZE_OPTION							FLASH_SIZE_OPTION_512K //very important, user need confirm !!!
+#define FLASH_SIZE_OPTION							FLASH_SIZE_OPTION_128K //very important, user need confirm !!!
 
-// User available flash range (512K device): 0x40000 - 0x7C000
-#define USER_FLASH_START_ADDR                         0x40000
-#define USER_FLASH_END_ADDR                           0x7C000
-#define USER_FLASH_SIZE                               (USER_FLASH_END_ADDR - USER_FLASH_START_ADDR)
+// User available flash range (128K device): 0x19000 - 0x1C000(100K-112K)
+#define USER_FLASH_START_ADDR                         0x19000
+#define USER_FLASH_END_ADDR                           0x1C000
 
 // Radar boundary storage (one 4K sector)
-#define RADAR_BOUNDARY_FLASH_ADDR                     USER_FLASH_START_ADDR
-// Radar install height storage (one 4K sector)
-#define RADAR_INSTALL_HEIGHT_FLASH_ADDR               (USER_FLASH_START_ADDR + 0x1000)
-// Radar play records storage (one 4K sector)
-#define RADAR_PLAY_RECORD_FLASH_ADDR                  (USER_FLASH_START_ADDR + 0x2000)
-// Battery percent persistence (one 4K sector)
-#define BAT_PERCENT_FLASH_ADDR                        (USER_FLASH_START_ADDR + 0x3000)
+#define BAT_PERCENT_FLASH_ADDR                        USER_FLASH_START_ADDR
 
 #define BLE_APP_SECURITY_ENABLE      				0
 #define	BLE_OTA_SERVER_ENABLE						0
@@ -51,8 +44,8 @@
 /* firmware signature check */
 #define FIRMWARES_SIGNATURE_ENABLE     		 		0
 /* Power Management */
-#define BLE_APP_PM_ENABLE							0
-#define PM_DEEPSLEEP_ENABLE            				0 		//test connection power, should disable deepSleep
+#define BLE_APP_PM_ENABLE							1
+#define PM_DEEPSLEEP_ENABLE            				1 		//test connection power, should disable deepSleep
 #define PM_DEEPSLEEP_RETENTION_ENABLE               0
 /* scan setting */
 #define SCAN_ENABLE									0

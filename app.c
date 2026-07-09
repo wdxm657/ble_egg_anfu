@@ -254,6 +254,7 @@ static void app_request_deep_sleep(void)
 {
     if (device_in_connection_state)
     {
+        BLE_LOG_D("deep sleep conn");
         bls_ll_terminateConnection(HCI_ERR_REMOTE_USER_TERM_CONN);
         bls_ll_setAdvEnable(0);
         sendTerminate_before_enterDeep = 1;
@@ -266,6 +267,8 @@ static void app_request_deep_sleep(void)
         cpu_set_gpio_wakeup(GPIO_KEY, Level_Low, 1);
         gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
 
+        gpio_write(GPIO_SOC_SWITCH, !LED_ON_LEVEL);
+        gpio_setup_up_down_resistor(GPIO_SOC_SWITCH, PM_PIN_PULLDOWN_100K);
         gpio_write(GPIO_LED_CHARGE_GREN, !LED_ON_LEVEL);
         gpio_write(GPIO_LED_CHARGE_RED, !LED_ON_LEVEL);
         gpio_write(GPIO_NTC_AD_EN, 0);
@@ -286,11 +289,13 @@ static u32 key_sleep_enable_tick = 0;
  */
 void blt_pm_proc(void)
 {
-    // if (sendTerminate_before_enterDeep == 2)
-    // {
-    //     app_request_deep_sleep();
-    //     return;
-    // }
+#if PM_DEEPSLEEP_ENABLE
+    if (sendTerminate_before_enterDeep == 2)
+    {
+        app_request_deep_sleep();
+        return;
+    }
+#endif
 #if (BLE_APP_PM_ENABLE)
     static u8  key_sm   = KEY_SM_IDLE;
     static u32 key_tick = 0;
@@ -404,7 +409,7 @@ void blt_pm_proc(void)
         }
     }
 
-    if (clock_time_exceed(key_sleep_enable_tick, KEY_SLEEP_ENABLE_DELAY_US * 2) && app_adc_mon_is_bat_percent_stable() &&
+    if (clock_time_exceed(key_sleep_enable_tick, KEY_SLEEP_ENABLE_DELAY_US * 12) &&
         !app_adc_mon_is_charging() && app_adc_mon_get_bat_percent_exact() < 5)
     {
         app_request_deep_sleep();
@@ -1070,20 +1075,20 @@ void main_loop(void)
     ////////////////////////////////////// BLE entry /////////////////////////////////
     blc_sdk_main_loop();
 
-    // u8 bat_percent_now = app_adc_mon_get_bat_percent_exact();
-    // {
-    //     if (bat_percent_now != s_bat_percent_last_reported)
-    //     {
-    //         s_bat_percent_last_reported = bat_percent_now;
-    //         BLE_LOG_D("bat: %d", bat_percent_now);
-    //         app_att_battery_update(bat_percent_now);
-    //     }
-    // }
+    u8 bat_percent_now = app_adc_mon_get_bat_percent_exact();
+    {
+        if (bat_percent_now != s_bat_percent_last_reported)
+        {
+            s_bat_percent_last_reported = bat_percent_now;
+            BLE_LOG_D("bat: %d", bat_percent_now);
+            app_att_battery_update(bat_percent_now);
+        }
+    }
 
-    // app_uart_task();
-    // app_ctrl_time_task();
-    // app_input_poll();
-    // app_adc_mon_poll();
+    app_uart_task();
+    app_ctrl_time_task();
+    app_input_poll();
+    app_adc_mon_poll();
 
 #if (UI_LED_ENABLE)
     app_ui_led_task();

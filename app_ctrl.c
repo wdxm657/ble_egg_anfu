@@ -137,6 +137,10 @@ static u8 s_pushed_status[9] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
+u8 get_work_state(){
+   return  g_ctrlState.workState;
+}
+
 /**
  * @brief 检查 g_ctrlState + 充电状态是否有变化，有则推送 STATUS 事件给 APP。
  *         payload 格式与 STATUS_GET RSP 一致 (10 字节)。
@@ -153,7 +157,12 @@ static void app_ctrl_state_try_push_event(void)
     cur[5] = g_ctrlState.calmMode;
     cur[6] = g_ctrlState.enabledMask;
     cur[7] = g_ctrlState.usMask;
-    cur[8] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
+    if (g_ctrlState.workState == 3)
+    {
+        cur[8] = s_pushed_status[8];
+    }else{
+        cur[8] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
+    }
 
     if (memcmp(s_pushed_status, cur, sizeof(cur)) == 0)
     {
@@ -2160,7 +2169,7 @@ void app_ctrl_time_task(void)
         g_ultra_stop_tick = 0;
     }
 
-    /* 每 1 秒向 SOC 同步 MCU 状态（蓝牙连接 + 电源），SOC 重启后可自动恢复 */
+    /* 每 1 秒向 SOC 同步 MCU 状态（蓝牙连接 + 电源），SOC 重启后可自动恢复*/
     {
         static u32 s_last_sync = 0;
         u32 now = clock_time();
@@ -2171,6 +2180,9 @@ void app_ctrl_time_task(void)
             payload[0] = g_ble_connected;
             payload[1] = g_ctrlState.powerState;
             app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, payload, 2, NULL);
+            
+            // Poll state changes and push to APP via EVENT
+            app_ctrl_state_try_push_event();
         }
     }
 
@@ -2189,11 +2201,6 @@ void app_ctrl_time_task(void)
         BLE_LOG_D("[TIMEOUT] CALM_RECORD_GET busy stuck >3s, clearing");
         g_ctx_calm_record_get.busy = 0;
     }
-
-
-
-    // Poll state changes and push to APP via EVENT
-    app_ctrl_state_try_push_event();
 }
 
 void app_ctrl_onRx(u8 *data, u16 len)

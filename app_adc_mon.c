@@ -469,9 +469,11 @@ void app_adc_mon_poll(void)
             s_bat_percent  = bat_percent;
             if (!first_5ms_flag)
             {
-                s_bat_percent  = bat_percent_raw;
+                // 由于当前设备ADC开关在SOC端，目前没有上拉，所以固定写死50,等后续接入硬件上拉后可以按读取值来
+                // s_bat_percent  = bat_percent_raw;
+                s_bat_percent  = 50;
                 first_5ms_flag = 1;
-                BLE_LOG_D("first_5ms_flag %d", bat_percent_raw);
+                BLE_LOG_D("first_5ms_flag %d", s_bat_percent);
                 app_adc_mon_bat_percent_save_to_flash();
             }
 
@@ -544,6 +546,11 @@ u8 app_adc_mon_is_usb_det(void)
 
 u8 app_adc_mon_is_charging(void)
 {
+    // 当工作状态为执行中时候固定回复不充电
+    if (get_work_state() == 3)
+    {
+        return 0;
+    }
     /* CHARGE_STATE(PB7): 充电中为低电平; USB_DET(PD0): 插入为低电平(已取反, s_usb_det_stable=1=插入) */
     return (s_charge_state_stable == 0 && s_usb_det_stable == 1) ? 1 : 0;
 }

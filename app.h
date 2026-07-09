@@ -24,8 +24,6 @@
 #ifndef _APP_H
 #define _APP_H
 
-#include "app_uart.h"
-
 
 /**
  * @brief		user initialization when MCU power on or wake_up from deepSleep mode

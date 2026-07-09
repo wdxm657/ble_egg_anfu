@@ -21,12 +21,15 @@ typedef struct
 
 typedef struct
 {
+    u8               cmdId;
     app_uart_evt_cb_t cb;
     void             *userData;
 } app_uart_evt_handler_t;
 
+#define APP_UART_EVT_HANDLER_MAX 12
+
 _attribute_data_retention_ static app_uart_pending_t     g_uart_pending[APP_UART_PENDING_MAX];
-_attribute_data_retention_ static app_uart_evt_handler_t g_uart_evt_handlers[256];
+_attribute_data_retention_ static app_uart_evt_handler_t g_uart_evt_handlers[APP_UART_EVT_HANDLER_MAX];
 
 static u16 app_uart_crc16_ibm(const u8 *data, u16 len)
 {
@@ -151,8 +154,17 @@ int app_uart_send_cmd_with_cb(
 
 void app_uart_register_evt_handler(u8 cmdId, app_uart_evt_cb_t evt_cb, void *userData)
 {
-    g_uart_evt_handlers[cmdId].cb       = evt_cb;
-    g_uart_evt_handlers[cmdId].userData = userData;
+    for (u8 i = 0; i < APP_UART_EVT_HANDLER_MAX; i++)
+    {
+        if (g_uart_evt_handlers[i].cb == NULL || g_uart_evt_handlers[i].cmdId == cmdId)
+        {
+            g_uart_evt_handlers[i].cmdId    = cmdId;
+            g_uart_evt_handlers[i].cb       = evt_cb;
+            g_uart_evt_handlers[i].userData = userData;
+            return;
+        }
+    }
+    BLE_LOG_D("[UART] evt handler table full, cmdId=0x%02x", cmdId);
 }
 
 static void app_uart_dispatch_rsp(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen)
@@ -176,15 +188,15 @@ static void app_uart_dispatch_rsp(u8 cmdId, u8 seq, const u8 *payload, u16 paylo
 
 static void app_uart_dispatch_evt(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen)
 {
-    app_uart_evt_cb_t cb = g_uart_evt_handlers[cmdId].cb;
-    if (cb)
+    for (u8 i = 0; i < APP_UART_EVT_HANDLER_MAX; i++)
     {
-        cb(cmdId, seq, payload, payloadLen, g_uart_evt_handlers[cmdId].userData);
+        if (g_uart_evt_handlers[i].cb != NULL && g_uart_evt_handlers[i].cmdId == cmdId)
+        {
+            g_uart_evt_handlers[i].cb(cmdId, seq, payload, payloadLen, g_uart_evt_handlers[i].userData);
+            return;
+        }
     }
-    else
-    {
-        BLE_LOG_D("[SOC_EVT] unhandled cmd=0x%02x seq=%d len=%d", cmdId, seq, payloadLen);
-    }
+    BLE_LOG_D("[SOC_EVT] unhandled cmd=0x%02x seq=%d len=%d", cmdId, seq, payloadLen);
 }
 
 static void app_uart_try_parse_one(void)
