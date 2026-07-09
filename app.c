@@ -30,8 +30,6 @@
 #include "app_buffer.h"
 #include "app_uart.h"
 #include "app_ctrl.h"
-#include "app_uart.h"
-#include "app_ctrl.h"
 #include "app_ultrasonic.h"
 #include "app_input.h"
 #include "app_adc_mon.h"
@@ -240,9 +238,47 @@ void task_suspend_exit(u8 e, u8 *p, int n)
 
 _attribute_data_retention_ static u32 scan_cycle_tick = 0;
 u8                                    scan_pm_disable = 0;
+#define KEY_SM_IDLE                    0
+#define KEY_SM_PRESS_DEBOUNCE          1
+#define KEY_SM_PRESSED                 2
+#define KEY_SM_RELEASE_DEBOUNCE        3
+#define KEY_DEBOUNCE_US                (20 * 1000)    // 按键去抖 20ms
+#define KEY_SLEEP_ENABLE_DELAY_US      (5 * 1000000)  // 初始化后 5s 才允许按键进深睡
 // scan cycle and active time
 #define SCAN_CYCLE_US  (1 * 1000000)
 #define SCAN_ACTIVE_US (1 * 1000 * 1000)
+
+
+#if (PM_DEEPSLEEP_ENABLE)
+static void app_request_deep_sleep(void)
+{
+    if (device_in_connection_state)
+    {
+        bls_ll_terminateConnection(HCI_ERR_REMOTE_USER_TERM_CONN);
+        bls_ll_setAdvEnable(0);
+        sendTerminate_before_enterDeep = 1;
+    }
+    else
+    {
+        app_adc_mon_bat_percent_save_to_flash();
+        cpu_set_gpio_wakeup(USB_DET, Level_Low, 1);
+        gpio_setup_up_down_resistor(GPIO_CHARGE_EN, PM_PIN_PULLUP_10K);
+        cpu_set_gpio_wakeup(GPIO_KEY, Level_Low, 1);
+        gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
+
+        gpio_write(GPIO_LED_CHARGE_GREN, !LED_ON_LEVEL);
+        gpio_write(GPIO_LED_CHARGE_RED, !LED_ON_LEVEL);
+        gpio_write(GPIO_NTC_AD_EN, 0);
+        // SOC端配置ADC开关
+        // gpio_write(V_BAT_CON, 0);
+
+        LOG_D("deep sleep no conn");
+        cpu_sleep_wakeup(DEEPSLEEP_MODE, PM_WAKEUP_PAD, 0);
+    }
+}
+#endif
+static u32 key_sleep_enable_tick = 0;
+
 /**
  * @brief      power management code for application
  * @param[in]  none
@@ -250,7 +286,14 @@ u8                                    scan_pm_disable = 0;
  */
 void blt_pm_proc(void)
 {
+    // if (sendTerminate_before_enterDeep == 2)
+    // {
+    //     app_request_deep_sleep();
+    //     return;
+    // }
 #if (BLE_APP_PM_ENABLE)
+    static u8  key_sm   = KEY_SM_IDLE;
+    static u32 key_tick = 0;
 #if (PM_DEEPSLEEP_RETENTION_ENABLE)
 #if (SCAN_ENABLE)
     if (scan_cycle_tick == 0)
@@ -276,7 +319,10 @@ void blt_pm_proc(void)
     bls_pm_setSuspendMask(SUSPEND_ADV | DEEPSLEEP_RETENTION_ADV | SUSPEND_CONN | DEEPSLEEP_RETENTION_CONN);
 #endif
 #else
-    bls_pm_setSuspendMask(SUSPEND_ADV | SUSPEND_CONN);
+    if ((blc_ll_getCurrentState() & BLS_LINK_STATE_CONN) || g_app_power_on)
+    {
+        bls_pm_setSuspendMask(SUSPEND_DISABLE);
+    }
 #endif
 #if (BLE_OTA_SERVER_ENABLE)
     if (ota_is_working)
@@ -291,30 +337,83 @@ void blt_pm_proc(void)
     }
 #endif
 #if (PM_DEEPSLEEP_ENABLE)  // test connection power, should disable deepSleep
-    if (sendTerminate_before_enterDeep == 2)
-    {                                                        // Terminate OK
-        cpu_sleep_wakeup(DEEPSLEEP_MODE, PM_WAKEUP_PAD, 0);  // deepSleep
-    }
-    if (!blc_ll_isControllerEventPending())
-    {  // no controller event pending
-        // adv 60s, deepsleep
-        if (blc_ll_getCurrentState() == BLS_LINK_STATE_ADV && !sendTerminate_before_enterDeep &&
-            clock_time_exceed(advertise_begin_tick, ADV_IDLE_ENTER_DEEP_TIME * 1000000))
+    // 检测按键：按下去抖确认 -> 松开去抖确认后，才进入深睡
+    {
+        u8 key_down = !gpio_read(GPIO_KEY);
+
+        switch (key_sm)
         {
-            cpu_sleep_wakeup(DEEPSLEEP_MODE, PM_WAKEUP_PAD, 0);  // deepsleep
-        }
-        // conn 60s no event(key/voice/led), enter deepsleep
-        else if (device_in_connection_state &&
-                 clock_time_exceed(latest_user_event_tick, CONN_IDLE_ENTER_DEEP_TIME * 1000000))
-        {
-            bls_ll_terminateConnection(HCI_ERR_REMOTE_USER_TERM_CONN);  // push terminate cmd into ble TX buffer
-            bls_ll_setAdvEnable(0);                                     // disable adv
-            sendTerminate_before_enterDeep = 1;
+        case KEY_SM_IDLE:
+            if (key_down)
+            {
+                key_sm   = KEY_SM_PRESS_DEBOUNCE;
+                key_tick = clock_time();
+            }
+            break;
+
+        case KEY_SM_PRESS_DEBOUNCE:
+            if (!key_down)
+            {
+                key_sm = KEY_SM_IDLE;
+            }
+            else if (clock_time_exceed(key_tick, KEY_DEBOUNCE_US))
+            {
+                if (!gpio_read(GPIO_KEY))
+                {
+                    key_sm = KEY_SM_PRESSED;
+                }
+                else
+                {
+                    key_sm = KEY_SM_IDLE;
+                }
+            }
+            break;
+
+        case KEY_SM_PRESSED:
+            if (!key_down)
+            {
+                key_sm   = KEY_SM_RELEASE_DEBOUNCE;
+                key_tick = clock_time();
+            }
+            break;
+
+        case KEY_SM_RELEASE_DEBOUNCE:
+            if (key_down)
+            {
+                key_sm = KEY_SM_PRESSED;
+            }
+            else if (clock_time_exceed(key_tick, KEY_DEBOUNCE_US))
+            {
+                if (!gpio_read(GPIO_KEY))
+                {
+                    key_sm = KEY_SM_PRESSED;
+                    break;
+                }
+                key_sm = KEY_SM_IDLE;
+                if (!clock_time_exceed(key_sleep_enable_tick, KEY_SLEEP_ENABLE_DELAY_US))
+                {
+                    break;
+                }
+                app_request_deep_sleep();
+            }
+            break;
+
+        default:
+            key_sm = KEY_SM_IDLE;
+            break;
         }
     }
+
+    if (clock_time_exceed(key_sleep_enable_tick, KEY_SLEEP_ENABLE_DELAY_US * 2) && app_adc_mon_is_bat_percent_stable() &&
+        !app_adc_mon_is_charging() && app_adc_mon_get_bat_percent_exact() < 5)
+    {
+        app_request_deep_sleep();
+    }
+
 #endif  // end of PM_DEEPSLEEP_ENABLE
 #endif  // END of  BLE_APP_PM_ENABLE
 }
+
 #if (APP_BATT_CHECK_ENABLE)  // battery check must do before OTA relative operation
 _attribute_data_retention_ u32 lowBattDet_tick = 0;
 /**
@@ -635,7 +734,9 @@ _attribute_no_inline_ void user_init_normal(void)
     gpio_setup_up_down_resistor(GPIO_KEY, PM_PIN_PULLUP_10K);
 #endif
 #endif
-
+#if (PM_DEEPSLEEP_ENABLE)
+    key_sleep_enable_tick = clock_time();
+#endif
     //////////////////////////// peripheral hardware Initialization  End //////////////////////////////////
     //////////////////////////// basic hardware Initialization  Begin //////////////////////////////////
     /* random number generator must be initiated before any BLE stack initialization.
@@ -969,20 +1070,20 @@ void main_loop(void)
     ////////////////////////////////////// BLE entry /////////////////////////////////
     blc_sdk_main_loop();
 
-    u8 bat_percent_now = app_adc_mon_get_bat_percent_exact();
-    {
-        if (bat_percent_now != s_bat_percent_last_reported)
-        {
-            s_bat_percent_last_reported = bat_percent_now;
-            BLE_LOG_D("bat: %d", bat_percent_now);
-            app_att_battery_update(bat_percent_now);
-        }
-    }
+    // u8 bat_percent_now = app_adc_mon_get_bat_percent_exact();
+    // {
+    //     if (bat_percent_now != s_bat_percent_last_reported)
+    //     {
+    //         s_bat_percent_last_reported = bat_percent_now;
+    //         BLE_LOG_D("bat: %d", bat_percent_now);
+    //         app_att_battery_update(bat_percent_now);
+    //     }
+    // }
 
-    app_uart_task();
-    app_ctrl_time_task();
-    app_input_poll();
-    app_adc_mon_poll();
+    // app_uart_task();
+    // app_ctrl_time_task();
+    // app_input_poll();
+    // app_adc_mon_poll();
 
 #if (UI_LED_ENABLE)
     app_ui_led_task();

@@ -410,6 +410,7 @@ void app_adc_mon_init(void)
     BLE_LOG_D("[ADC_MON] init done (bat=PB2, ntc=PB4, flash_pct=%d)", s_bat_percent);
 }
 
+static u8 first_5ms_flag;
 void app_adc_mon_poll(void)
 {
     u32 now = clock_time();
@@ -466,6 +467,13 @@ void app_adc_mon_poll(void)
         {
             u8 bat_percent = app_adc_mon_bat_percent_apply_rate_limit(bat_percent_raw, is_charging);
             s_bat_percent  = bat_percent;
+            if (!first_5ms_flag)
+            {
+                s_bat_percent  = bat_percent_raw;
+                first_5ms_flag = 1;
+                BLE_LOG_D("first_5ms_flag %d", bat_percent_raw);
+                app_adc_mon_bat_percent_save_to_flash();
+            }
 
             /* 充电中且电量 <5%: 软件关机 (防止深度放电) */
             if (app_adc_mon_is_charging() && s_bat_percent < 5)
