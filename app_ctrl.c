@@ -1155,57 +1155,6 @@ int app_ctrl_send(u8 msgType, u8 cmdId, u8 seq, u8 *payload, u16 payloadLen)
     return 0;
 }
 
-// ----------------------- direct text/bytes to BLE (EVENT: CTRL_CMD_TEXT_CHUNK) -----------------------
-// Send arbitrary bytes/text to PC visualizer via Ctrl TX notify (chunked to fit 20-byte ATT value).
-static u8 g_textTxTransferId = 0;
-
-void app_ctrl_text_send_bytes(const u8 *data, u16 len)
-{
-    if (!data || len == 0)
-    {
-        return;
-    }
-    if (BLS_CONN_HANDLE == 0xFFFF)
-    {
-        return;
-    }
-
-    u8 maxData = CTRL_TEXT_CHUNK_DATA_MAX;
-    u8 total   = (u8)((len + maxData - 1) / maxData);
-    if (total == 0)
-    {
-        total = 1;
-    }
-
-    u8 transferId = g_textTxTransferId++;
-
-    for (u8 idx = 0; idx < total; idx++)
-    {
-        u16 off = (u16)idx * (u16)maxData;
-        u16 rem = (len > off) ? (len - off) : 0;
-        u8  dln = (rem > maxData) ? maxData : (u8)rem;
-
-        // payload: [0]=transferId, [1]=chunkIndex, [2]=chunkTotal, [3]=dataLen, [4..]=data
-        u8 pl[4 + CTRL_TEXT_CHUNK_DATA_MAX];
-        pl[0] = transferId;
-        pl[1] = idx;
-        pl[2] = total;
-        pl[3] = dln;
-        if (dln)
-        {
-            memcpy(&pl[4], data + off, dln);
-        }
-        app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_TEXT_CHUNK, g_ctrlSeq++, pl, (u16)(4 + dln));
-
-        // Space NOTIFYs so the stack copies g_ctrlTxBuf each time (same buffer for all sends).
-        if (idx + 1 < total)
-        {
-            sleep_us(5000);
-        }
-    }
-    // sleep_us(10000);
-}
-
 // ----------------------- log output via dedicated Log TX characteristic (0x03 UUID) -----------------------
 // Send raw bytes directly via notify on the Log TX handle (no protocol framing).
 void app_ctrl_log_send_bytes(const u8 *data, u16 len)
