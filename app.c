@@ -43,7 +43,6 @@
 #define MY_RF_POWER_INDEX         RF_POWER_P2p87dBm
 #define MY_DIRECT_ADV_TIME        10000000
 #define BLE_DEVICE_ADDRESS_TYPE   BLE_DEVICE_ADDRESS_PUBLIC
-u32 soc_switch_tick;
 u32 advertise_begin_tick;
 u32 g_time_tick_last = 0;
 #if (PM_DEEPSLEEP_ENABLE)
@@ -698,8 +697,9 @@ _attribute_no_inline_ void user_init_normal(void)
     /* 输出引脚初始化 */
     gpio_set_func(GPIO_SOC_SWITCH, PD4_FUNC);
     gpio_set_output_en(GPIO_SOC_SWITCH, PD4_OUTPUT_ENABLE);
+    gpio_write(GPIO_SOC_SWITCH, !LED_ON_LEVEL);
+    sleep_ms(1000);
     gpio_write(GPIO_SOC_SWITCH, LED_ON_LEVEL);
-    soc_switch_tick = clock_time();
 
     gpio_set_func(GPIO_LED_CHARGE_GREN, PC0_FUNC);
     gpio_set_output_en(GPIO_LED_CHARGE_GREN, PC0_OUTPUT_ENABLE);
