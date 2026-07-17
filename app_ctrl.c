@@ -1897,12 +1897,6 @@ void app_ctrl_notify_new_record(void)
 static int app_ctrl_handle_factory_reset(u8 seq, u8 *payload, u16 len)
 {
     (void)payload;
-    if (len != 1)
-    {
-        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
-        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, seq, rsp, sizeof(rsp));
-        return -1;
-    }
     if (!app_ctrl_check_soc_online(CTRL_CMD_FACTORY_RESET, seq))
     {
         return -1;
