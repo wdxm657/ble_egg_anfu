@@ -866,7 +866,7 @@ _attribute_no_inline_ void user_init_normal(void)
     int          flag = flash_read_mid_uid_with_check(&flash_mid, g_flash_uid);
     for (int i = 0; i < 16; i++)
     {
-        tbl_scanRsp[15 + i] = g_flash_uid[i];
+        tbl_scanRsp[12 + i] = g_flash_uid[i];
     }
     if (flag == 0)
     {  // reading flash UID error
