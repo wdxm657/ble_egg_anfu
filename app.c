@@ -409,6 +409,14 @@ void blt_pm_proc(void)
     }
 
 #endif  // end of PM_DEEPSLEEP_ENABLE
+    /*
+     * SOC UART has no flow control and is not configured as a wake source.
+     * Allowing BLE suspend while the SOC is alive can drop bytes from the
+     * 10-byte heartbeat frame, leaving fragments such as "55 AA ... 55 AA"
+     * that both sides later parse as invalid frames. Keep normal explicit
+     * deep-sleep paths above, but do not enter BLE suspend during runtime.
+     */
+    bls_pm_setSuspendMask(SUSPEND_DISABLE);
 #endif  // END of  BLE_APP_PM_ENABLE
 }
 
@@ -910,7 +918,7 @@ _attribute_no_inline_ void user_init_normal(void)
     blc_pm_setDeepsleepRetentionEarlyWakeupTiming(550);
 #endif
 #else
-    bls_pm_setSuspendMask(SUSPEND_ADV | SUSPEND_CONN);
+    bls_pm_setSuspendMask(SUSPEND_DISABLE);
 #endif
     bls_app_registerEventCallback(BLT_EV_FLAG_SUSPEND_ENTER, &task_sleep_enter);
 #else

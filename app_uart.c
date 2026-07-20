@@ -33,6 +33,23 @@ typedef struct
 _attribute_data_retention_ static app_uart_pending_t     g_uart_pending[APP_UART_PENDING_MAX];
 _attribute_data_retention_ static app_uart_evt_handler_t g_uart_evt_handlers[APP_UART_EVT_HANDLER_MAX];
 
+static void app_uart_drop_rx_bytes(u8 n)
+{
+    if (n == 0)
+    {
+        return;
+    }
+
+    if (n >= g_uart_soc_rx_len)
+    {
+        g_uart_soc_rx_len = 0;
+        return;
+    }
+
+    memmove(g_uart_soc_rx_buf, &g_uart_soc_rx_buf[n], g_uart_soc_rx_len - n);
+    g_uart_soc_rx_len = (u8)(g_uart_soc_rx_len - n);
+}
+
 static u16 app_uart_crc16_ibm(const u8 *data, u16 len)
 {
     u16 crc = 0xFFFF;
@@ -232,13 +249,20 @@ static void app_uart_try_parse_one(void)
     }
     if ((start + 1) >= g_uart_soc_rx_len)
     {
-        g_uart_soc_rx_len = 0;
+        if (g_uart_soc_rx_buf[g_uart_soc_rx_len - 1] == 0x55)
+        {
+            g_uart_soc_rx_buf[0] = 0x55;
+            g_uart_soc_rx_len    = 1;
+        }
+        else
+        {
+            g_uart_soc_rx_len = 0;
+        }
         return;
     }
     if (start > 0)
     {
-        memmove(g_uart_soc_rx_buf, &g_uart_soc_rx_buf[start], g_uart_soc_rx_len - start);
-        g_uart_soc_rx_len = (u8)(g_uart_soc_rx_len - start);
+        app_uart_drop_rx_bytes((u8)start);
     }
 
     if (g_uart_soc_rx_len < 10)
@@ -248,9 +272,16 @@ static void app_uart_try_parse_one(void)
 
     u16 payloadLen = g_uart_soc_rx_buf[6] | (((u16)g_uart_soc_rx_buf[7]) << 8);
     u16 frameLen   = (u16)(8 + payloadLen + 2);
-    if (frameLen > sizeof(g_uart_soc_rx_buf))
+    if (g_uart_soc_rx_buf[2] != UART_PROTO_VER ||
+        (g_uart_soc_rx_buf[3] != UART_MSG_RSP && g_uart_soc_rx_buf[3] != UART_MSG_EVT) ||
+        payloadLen > APP_UART_MAX_PAYLOAD ||
+        frameLen > sizeof(g_uart_soc_rx_buf))
     {
-        g_uart_soc_rx_len = 0;
+        BLE_LOG_D("[SOC_FRAME] invalid header ver=0x%02x type=0x%02x len=%d",
+                  g_uart_soc_rx_buf[2],
+                  g_uart_soc_rx_buf[3],
+                  payloadLen);
+        app_uart_drop_rx_bytes(1);
         return;
     }
     if (g_uart_soc_rx_len < frameLen)
@@ -283,27 +314,46 @@ static void app_uart_try_parse_one(void)
     else
     {
         BLE_LOG_D("[SOC_FRAME] crc_err recv=0x%04x calc=0x%04x", recvCrc, calcCrc);
+        app_uart_drop_rx_bytes(1);
+        return;
     }
 
-    if (g_uart_soc_rx_len > frameLen)
-    {
-        memmove(g_uart_soc_rx_buf, &g_uart_soc_rx_buf[frameLen], g_uart_soc_rx_len - frameLen);
-    }
-    g_uart_soc_rx_len = (u8)(g_uart_soc_rx_len - frameLen);
+    app_uart_drop_rx_bytes((u8)frameLen);
 }
 
 void app_uart_init(void)
 {
     // USART initial for SOC communication (PC1:TX, PC0:RX, 9600 8N1)
     uart_gpio_set(GPIO_SOC_URAT_TX, GPIO_SOC_URAT_RX);
+    uart_irq_enable(0, 0);
+    uart_reset();
     uart_init_baudrate(9600, CLOCK_SYS_CLOCK_HZ, PARITY_NONE, STOP_BIT_ONE);
     uart_dma_enable(0, 0);
     uart_ndma_clear_rx_index();
     uart_ndma_clear_tx_index();
     uart_ndma_irq_triglevel(1, 0);
-    uart_irq_enable(1, 0);
+    uart_clear_parity_error();
+    g_uart_soc_rx_len = 0;
+    g_uart_seq        = 0;
     memset(g_uart_pending, 0, sizeof(g_uart_pending));
     memset(g_uart_evt_handlers, 0, sizeof(g_uart_evt_handlers));
+    uart_irq_enable(1, 0);
+}
+
+void app_uart_clear_rx_buf(void)
+{
+    uart_irq_enable(0, 0);
+
+    unsigned char rx_cnt = reg_uart_buf_cnt & 0x0f;
+    while (rx_cnt--)
+    {
+        (void)uart_ndma_read_byte();
+    }
+    uart_ndma_clear_rx_index();
+    uart_clear_parity_error();
+    g_uart_soc_rx_len = 0;
+
+    uart_irq_enable(1, 0);
 }
 
 void app_uart_ndma_irq_proc(void)
@@ -314,6 +364,12 @@ void app_uart_ndma_irq_proc(void)
     }
 
     unsigned char rx_cnt = reg_uart_buf_cnt & 0x0f;
+    if (rx_cnt > 8)
+    {
+        app_uart_clear_rx_buf();
+        BLE_LOG_D("[SOC_FRAME] uart rx overflow");
+        return;
+    }
 
     while (rx_cnt--)
     {
@@ -325,6 +381,10 @@ void app_uart_ndma_irq_proc(void)
         else
         {
             g_uart_soc_rx_len = 0;
+            if (data == 0x55)
+            {
+                g_uart_soc_rx_buf[g_uart_soc_rx_len++] = data;
+            }
         }
     }
 }
