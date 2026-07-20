@@ -41,6 +41,12 @@ extern u8 customCtrlLogCCC[2];
 static u8  g_soc_online              = 0;
 static u32 g_soc_last_heartbeat_tick = 0;
 
+static void app_ctrl_mark_soc_online(void)
+{
+    g_soc_online              = 1;
+    g_soc_last_heartbeat_tick = clock_time();
+}
+
 /**
  * @brief  Public: check if SOC is currently considered online.
  * @return 1 if online, 0 if offline.
@@ -76,9 +82,8 @@ static void app_ctrl_evt_heartbeat_from_soc(u8 cmdId, u8 seq, const u8 *payload,
     (void)payloadLen;
     (void)userData;
 
-    // BLE_LOG_D("soc heart beat");
-    g_soc_online              = 1;
-    g_soc_last_heartbeat_tick = clock_time();
+    BLE_LOG_D("[SOC_EVT] HEARTBEAT");
+    app_ctrl_mark_soc_online();
 }
 
 typedef struct
@@ -101,7 +106,7 @@ typedef struct
 
 static app_ctrl_state_t g_ctrlState = {
     .powerState         = 0,
-    .workState          = 1,
+    .workState          = 0,
     .btLinked           = 1,
     .ownerVoiceExist    = 0,
     .ownerVoiceDuration = 0,

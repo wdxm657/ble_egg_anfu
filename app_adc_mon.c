@@ -496,14 +496,14 @@ void app_adc_mon_poll(void)
         s_bat_mv = (_mv_bat_avg > 0xFFFFu) ? 0xFFFFu : (u16)_mv_bat_avg;
 
         /* 每秒日志 */
-        if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
-        {
-            s_log_tick = now;
-            if (s_ntc_temp_valid)
-                BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=%dC charge=%d", s_bat_mv,raw, s_bat_percent,mv_bat_avg, s_ntc_temp_c, is_charging);
-            else
-                BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=INVALID charge=%d", s_bat_mv, raw,s_bat_percent,mv_bat_avg, is_charging);
-        }
+        // if (s_log_tick == 0 || clock_time_exceed(s_log_tick, 1000000))
+        // {
+        //     s_log_tick = now;
+        //     if (s_ntc_temp_valid)
+        //         BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=%dC charge=%d", s_bat_mv,raw, s_bat_percent,mv_bat_avg, s_ntc_temp_c, is_charging);
+        //     else
+        //         BLE_LOG_D("[ADC] bat=%dmV(raw %d lim %d) avg_mv %d ntc=INVALID charge=%d", s_bat_mv, raw,s_bat_percent,mv_bat_avg, is_charging);
+        // }
 
         /* 温控充电管理 */
         app_adc_mon_temp_charge_manage();

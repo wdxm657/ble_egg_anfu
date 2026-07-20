@@ -15,6 +15,7 @@ typedef struct
     u8                inUse;
     u8                cmdId;
     u8                seq;
+    u32               tick;
     app_uart_rsp_cb_t cb;
     void             *userData;
 } app_uart_pending_t;
@@ -27,6 +28,7 @@ typedef struct
 } app_uart_evt_handler_t;
 
 #define APP_UART_EVT_HANDLER_MAX 12
+#define APP_UART_RSP_TIMEOUT_US  3000000
 
 _attribute_data_retention_ static app_uart_pending_t     g_uart_pending[APP_UART_PENDING_MAX];
 _attribute_data_retention_ static app_uart_evt_handler_t g_uart_evt_handlers[APP_UART_EVT_HANDLER_MAX];
@@ -129,6 +131,7 @@ int app_uart_send_cmd_with_cb(
         g_uart_pending[slot].inUse    = 1;
         g_uart_pending[slot].cmdId    = cmdId;
         g_uart_pending[slot].seq      = seq;
+        g_uart_pending[slot].tick     = clock_time();
         g_uart_pending[slot].cb       = rsp_cb;
         g_uart_pending[slot].userData = userData;
     }
@@ -197,6 +200,18 @@ static void app_uart_dispatch_evt(u8 cmdId, u8 seq, const u8 *payload, u16 paylo
         }
     }
     BLE_LOG_D("[SOC_EVT] unhandled cmd=0x%02x seq=%d len=%d", cmdId, seq, payloadLen);
+}
+
+static void app_uart_cleanup_pending_timeout(void)
+{
+    for (u8 i = 0; i < APP_UART_PENDING_MAX; i++)
+    {
+        if (g_uart_pending[i].inUse && clock_time_exceed(g_uart_pending[i].tick, APP_UART_RSP_TIMEOUT_US))
+        {
+            BLE_LOG_D("[SOC_RSP] timeout cmd=0x%02x seq=%d", g_uart_pending[i].cmdId, g_uart_pending[i].seq);
+            g_uart_pending[i].inUse = 0;
+        }
+    }
 }
 
 static void app_uart_try_parse_one(void)
@@ -316,6 +331,8 @@ void app_uart_ndma_irq_proc(void)
 
 void app_uart_task(void)
 {
+    app_uart_cleanup_pending_timeout();
+
     while (g_uart_soc_rx_len >= 10)
     {
         u8 before = g_uart_soc_rx_len;

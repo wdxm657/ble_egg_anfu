@@ -1074,7 +1074,7 @@ void main_loop(void)
         if (bat_percent_now != s_bat_percent_last_reported)
         {
             s_bat_percent_last_reported = bat_percent_now;
-            BLE_LOG_D("bat: %d", bat_percent_now);
+            // BLE_LOG_D("bat: %d", bat_percent_now);
             app_att_battery_update(bat_percent_now);
         }
     }
