@@ -82,7 +82,11 @@ static void app_ctrl_evt_heartbeat_from_soc(u8 cmdId, u8 seq, const u8 *payload,
     (void)payloadLen;
     (void)userData;
 
-    BLE_LOG_D("[SOC_EVT] HEARTBEAT");
+    if (!g_soc_online)
+    {
+        BLE_LOG_D("[SOC_EVT] HEARTBEAT");
+    }
+    
     app_ctrl_mark_soc_online();
 }
 
