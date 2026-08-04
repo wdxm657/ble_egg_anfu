@@ -332,7 +332,7 @@ class BleController:
                 measure_cnt = p[idx]
                 idx += 1
 
-                if measure_cnt > 3 or idx + measure_cnt + 1 > len(p):
+                if measure_cnt > 4 or idx + measure_cnt + 1 > len(p):
                     return f"{base} [ERR] invalid measure section payload={p.hex()}"
 
                 measure_order = list(p[idx : idx + measure_cnt])
@@ -346,7 +346,7 @@ class BleController:
                 us_order = list(p[idx : idx + us_cnt])
 
                 def _measure_name(v: int) -> str:
-                    return {1: "music", 2: "owner_voice", 3: "ultrasonic"}.get(v, f"unknown({v})")
+                    return {1: "music", 2: "owner_voice", 3: "ultrasonic", 4: "snack_feed"}.get(v, f"unknown({v})")
 
                 def _us_name(v: int) -> str:
                     return {1: "25k", 2: "30k", 3: "25k+30k"}.get(v, f"unknown({v})")
@@ -377,6 +377,7 @@ class BleController:
                     0x04: "US_25K",
                     0x05: "US_30K",
                     0x06: "US_DUAL",
+                    0x07: "SNACK",
                     0x10: "SUCCESS",
                     0x11: "FAIL",
                 }
@@ -771,6 +772,7 @@ class MainWindow(QtWidgets.QWidget):
         self.chk_music = QtWidgets.QCheckBox("音乐")
         self.chk_owner = QtWidgets.QCheckBox("主人录音")
         self.chk_us = QtWidgets.QCheckBox("超声")
+        self.chk_snack = QtWidgets.QCheckBox("零食投喂")
         self.chk_music.setChecked(True)
         self.chk_us.setChecked(True)
         self.ed_measure_order = QtWidgets.QLineEdit("1,3")
@@ -785,10 +787,11 @@ class MainWindow(QtWidgets.QWidget):
         b4.addWidget(self.chk_music, 0, 0)
         b4.addWidget(self.chk_owner, 0, 1)
         b4.addWidget(self.chk_us, 0, 2)
-        b4.addWidget(QtWidgets.QLabel("措施顺序(1,2,3):"), 1, 0)
-        b4.addWidget(self.ed_measure_order, 1, 1, 1, 2)
+        b4.addWidget(self.chk_snack, 0, 3)
+        b4.addWidget(QtWidgets.QLabel("措施顺序(1,2,3,4):"), 1, 0)
+        b4.addWidget(self.ed_measure_order, 1, 1, 1, 3)
         b4.addWidget(QtWidgets.QLabel("超声顺序(1,2,3):"), 2, 0)
-        b4.addWidget(self.ed_us_order, 2, 1, 1, 2)
+        b4.addWidget(self.ed_us_order, 2, 1, 1, 3)
         b4.addWidget(QtWidgets.QLabel("查询策略:"), 3, 0)
         b4.addWidget(self.cmb_strategy_mode, 3, 1)
         b4.addWidget(btn_strategy_set, 4, 1)
@@ -853,7 +856,7 @@ class MainWindow(QtWidgets.QWidget):
         self._send(CTRL_CMD_CALM_MODE_SET, bytes([mode]), f"CALM_MODE_SET mode={mode}")
 
     def _send_strategy_set(self) -> None:
-        mode = int(self.cmb_mode.currentData())
+        mode = int(self.cmb_strategy_mode.currentData())
         enabled = 0
         if self.chk_music.isChecked():
             enabled |= 1 << 0
@@ -861,6 +864,8 @@ class MainWindow(QtWidgets.QWidget):
             enabled |= 1 << 1
         if self.chk_us.isChecked():
             enabled |= 1 << 2
+        if self.chk_snack.isChecked():
+            enabled |= 1 << 3
         if enabled == 0:
             QtWidgets.QMessageBox.warning(self, "参数错误", "至少勾选一种安抚措施")
             return
@@ -872,9 +877,14 @@ class MainWindow(QtWidgets.QWidget):
                 self, "参数错误", "顺序输入格式错误，请用逗号分隔整数"
             )
             return
-        if len(measure_order) > 3 or len(us_order) > 3:
+        if mode == 0 and ((enabled & (1 << 3)) or 4 in measure_order):
             QtWidgets.QMessageBox.warning(
-                self, "参数错误", "措施顺序和超声顺序最多 3 项"
+                self, "参数错误", "自动策略禁止配置零食投喂"
+            )
+            return
+        if len(measure_order) > 4 or len(us_order) > 3:
+            QtWidgets.QMessageBox.warning(
+                self, "参数错误", "措施顺序最多 4 项，超声顺序最多 3 项"
             )
             return
 
@@ -950,6 +960,7 @@ class MainWindow(QtWidgets.QWidget):
             self.chk_music.setChecked(bool(enabled_mask & 0x01))
             self.chk_owner.setChecked(bool(enabled_mask & 0x02))
             self.chk_us.setChecked(bool(enabled_mask & 0x04))
+            self.chk_snack.setChecked(bool(enabled_mask & 0x08))
             # 充电状态（byte8），电池百分比来自标准 Battery Service
             chg = frame.payload[8] if len(frame.payload) >= 9 else 0
             self.ctrl._charging = chg
@@ -977,7 +988,7 @@ class MainWindow(QtWidgets.QWidget):
             idx += 1
             m_cnt = p[idx]
             idx += 1
-            if m_cnt > 3 or idx + m_cnt + 1 > len(p):
+            if m_cnt > 4 or idx + m_cnt + 1 > len(p):
                 return
             measure_order = list(p[idx : idx + m_cnt])
             idx += m_cnt
@@ -992,6 +1003,7 @@ class MainWindow(QtWidgets.QWidget):
             self.chk_music.setChecked(bool(enabled & 0x01))
             self.chk_owner.setChecked(bool(enabled & 0x02))
             self.chk_us.setChecked(bool(enabled & 0x04))
+            self.chk_snack.setChecked(bool(enabled & 0x08))
             self.ed_measure_order.setText(",".join(str(v) for v in measure_order))
             self.ed_us_order.setText(",".join(str(v) for v in us_order))
             measure_names = [self._measure_name(v) for v in measure_order]
@@ -1042,6 +1054,7 @@ class MainWindow(QtWidgets.QWidget):
         1: "音乐",
         2: "主人录音",
         3: "超声",
+        4: "零食投喂",
     }
 
     US_SUB_NAMES = {
@@ -1123,6 +1136,7 @@ class MainWindow(QtWidgets.QWidget):
             0x04: "US_25K",
             0x05: "US_30K",
             0x06: "US_DUAL",
+            0x07: "SNACK",
             0x10: "SUCCESS",
             0x11: "FAIL",
         }
@@ -1208,7 +1222,7 @@ class MainWindow(QtWidgets.QWidget):
 
     @staticmethod
     def _measure_name(v: int) -> str:
-        return {1: "music", 2: "owner_voice", 3: "ultrasonic"}.get(v, f"unknown({v})")
+        return {1: "music", 2: "owner_voice", 3: "ultrasonic", 4: "snack_feed"}.get(v, f"unknown({v})")
 
     @staticmethod
     def _us_name(v: int) -> str:

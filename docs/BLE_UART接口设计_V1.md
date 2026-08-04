@@ -229,8 +229,8 @@ Byte6.. payload
 16) `0x37 CALM_STRATEGY_SET`  
 - 请求：  
   `[mode, enabledMask, measureOrderCount, measureOrder..., usOrderCount, usOrder...]`
-  - `enabledMask` bit0 音乐，bit1 主人录音，bit2 超声
-  - `measureOrder` 元素：1=音乐，2=主人录音，3=超声
+  - `enabledMask` bit0 音乐，bit1 主人录音，bit2 超声，bit3 零食投喂；自动模式禁止 bit3
+  - `measureOrder` 元素：1=音乐，2=主人录音，3=超声，4=零食投喂；自动模式禁止 4
   - `usOrder` 元素：1=25kHz@100dB，2=30kHz@80dB，3=25&30kHz@100dB
 - 响应：`[status]`
 - 规则校验：至少一个措施；手动模式按请求顺序执行；自动模式超声顺序可动态调整。
@@ -242,9 +242,9 @@ Byte6.. payload
 - 响应字段解读与使用：
   - `status`：先判断是否为 `0x00`；非 `0x00` 时按错误处理，不解析后续字段。
   - `mode`：`0=自动调整`，`1=人工干预`。
-  - `enabledMask`：bit0=音乐，bit1=主人录音，bit2=超声；前端可直接用于勾选态恢复。
-  - `measureOrderCount`：后续 `measureOrder` 数组长度（0~3）。
-  - `measureOrder`：元素取值 `1=音乐，2=主人录音，3=超声`，表示主措施执行顺序。
+  - `enabledMask`：bit0=音乐，bit1=主人录音，bit2=超声，bit3=零食投喂；自动模式禁止 bit3；前端可直接用于勾选态恢复。
+  - `measureOrderCount`：后续 `measureOrder` 数组长度（0~4）。
+  - `measureOrder`：元素取值 `1=音乐，2=主人录音，3=超声，4=零食投喂`，表示主措施执行顺序；自动模式禁止 4。
   - `usOrderCount`：后续 `usOrder` 数组长度（0~3）。
   - `usOrder`：元素取值 `1=25kHz，2=30kHz，3=25&30kHz`，表示超声子顺序。
 - 前端解析伪代码：
@@ -469,4 +469,3 @@ ByteN+1 crcH
   - `cmdId` 不复用；
   - 向后兼容需保留旧字段语义；
   - 破坏性改动升级 `ver`。
-

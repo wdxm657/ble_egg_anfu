@@ -43,6 +43,7 @@ enum{
     UART_SOC_ERROR_EVT          = 0x86,
     UART_SOC_HEARTBEAT_EVT      = 0x87,
     UART_SOC_NEW_CALM_RECORD_EVT = 0x88,  /* SOC 通知 MCU 有新的安抚记录已保存 */
+    UART_SOC_SNACK_FEED_EVT     = 0x89,  /* SOC requests MCU snack feeding */
 };
 
 /**

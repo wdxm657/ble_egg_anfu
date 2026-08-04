@@ -178,7 +178,7 @@
 | byte9  | `btLinked`        | 兼容字段：当前连接下**固定为** `0x01`                               |
 | byte10 | `volume`          | 音量 `0`～`100` (百分比)                                             |
 | byte11 | `calmMode`        | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
-| byte12 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
+| byte12 | `enabledMask`     | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声，bit3=零食投喂                   |
 | byte13 | `usMask`          | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
 | byte14 | `charging`        | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
@@ -559,6 +559,7 @@
 | `0x04` | US_25K  | 超声波 25KHz                         |
 | `0x05` | US_30K  | 超声波 30KHz                         |
 | `0x06` | US_DUAL | 超声波双频                           |
+| `0x07` | SNACK   | 零食投喂                             |
 | `0x10` | SUCCESS | 安抚成功（每条记录的最后一个 entry） |
 | `0x11` | FAIL    | 安抚失败（每条记录的最后一个 entry） |
 
@@ -707,7 +708,7 @@
 
 说明：下文 `§4.13` 指安抚模式设置节。
 
-负载为变长：`payloadLen = 3 + M + 1 + U`，其中 `M = measureOrderCount`（1～3），`U = usOrderCount`（1～3）。整帧须满足 `6 + payloadLen <= 20`。
+负载为变长：`payloadLen = 3 + M + 1 + U`，其中 `M = measureOrderCount`（1～4），`U = usOrderCount`（1～3）。整帧须满足 `6 + payloadLen <= 20`。
 
 **帧头（byte0～byte5）**
 
@@ -730,9 +731,9 @@
 | -------------------- | ------------------- | ------------------------------------------------- |
 | 字节                 | 值/变量             | 注释                                              |
 | byte6                | `mode`              | 与 §4.13 相同；仅允许 `0`或 `1`                   |
-| byte7                | `enabledMask`       | bit0=音乐，bit1=主人录音，bit2=超声；**不可为 0** |
-| byte8                | `measureOrderCount` | `M`，执行顺序项个数，1～3                         |
-| byte9 ～ `byte(8+M)` | `measureOrder[i]`   | 每项：`1`=音乐，`2`=主人录音，`3`=超声            |
+| byte7                | `enabledMask`       | bit0=音乐，bit1=主人录音，bit2=超声，bit3=零食投喂；**不可为 0**；自动策略禁止 bit3 |
+| byte8                | `measureOrderCount` | `M`，执行顺序项个数，1～4                         |
+| byte9 ～ `byte(8+M)` | `measureOrder[i]`   | 每项：`1`=音乐，`2`=主人录音，`3`=超声，`4`=零食投喂；自动策略禁止 `4` |
 
 
 **负载末段（超声顺序）**
@@ -783,7 +784,7 @@
 **注意**：SOC 端维护两个独立的策略文件（`calm_strategy_auto.bin` / `calm_strategy_manual.bin`），查询时需指定要获取哪个。设置策略（`CALM_STRATEGY_SET`）时自动根据 payload 中的 `mode` 字段保存到对应文件；模式切换（`CALM_MODE_SET`）时也会将当前策略持久化到对应文件。
 
 **响应帧（设备 → APP），变长**  
-令 `M = measureOrderCount`，`U = usOrderCount`，则 `payloadLen = 4 + M + U`（最大 `4+3+3=10`），总长 `6 + payloadLen`，不超过 20。
+令 `M = measureOrderCount`，`U = usOrderCount`，则 `payloadLen = 4 + M + U`（最大 `4+4+3=11`），总长 `6 + payloadLen`，不超过 20。
 
 
 |                       |                     |                   |
@@ -1129,7 +1130,7 @@ payload 格式与 STATUS_GET（§4.2）的响应一致，EVENT 类型标识 `msg
 | byte9  | `btLinked`      | 蓝牙连接状态：当前会话固定 `0x01`                                   |
 | byte10 | `volume`        | 音量 `0`～`100` (百分比)                                            |
 | byte11 | `calmMode`      | 安抚模式：`0x00`自动调整，`0x01`人工干预                            |
-| byte12 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声                   |
+| byte12 | `enabledMask`   | 安抚措施使能：bit0=音乐，bit1=主人录音，bit2=超声，bit3=零食投喂                   |
 | byte13 | `usMask`        | 超声子项使能：bit0=25kHz，bit1=30kHz，bit2=25kHz+30kHz              |
 | byte14 | `charging`      | 充电状态（**MCU 本地 ADC 监测**）：`0x00`未充电，`0x01`充电中       |
 
@@ -1147,4 +1148,3 @@ APP 应在收到此事件后刷新本地缓存的状态展示，无需再次调�
 3. `CALM_RECORD_GET(0x33)` 按逐条 entry 的 `entryIdx / totalEntriesInRecord` 拼成完整记录，并记录 `session_id`；拿到记录的最后一条 entry 后调用 `CALM_RECORD_DELETE(0x3A)` 传入该 `session_id` 删除，循环直至无记录。
 4. 若收到 `CALM_RECORD_NOTIFY(0x84)` EVENT，表示设备端当前存在安抚记录，可点击「查询安抚记录」按钮读取，或忽略在适当时机再查。该通知每秒重复发送，直到记录被读取删除。
 5. 若 `status != 0x00`，结合 §3 与对应接口的 `errDetail`（若有）提示用户或重试。
-

@@ -38,6 +38,11 @@ extern u8 customCtrlLogCCC[2];
 // SOC sends heartbeat every ~2s; if missing for SOC_HEARTBEAT_TIMEOUT_US, mark offline.
 #define SOC_HEARTBEAT_TIMEOUT_US 7000000  // 7 s (tolerates ~3 lost beats)
 
+#define CTRL_CALM_MEASURE_MAX         4
+#define CTRL_CALM_MEASURE_SNACK_FEED  4
+#define CTRL_CALM_MEASURE_MASK_ALL    0x0F
+#define CTRL_CALM_MEASURE_MASK_SNACK  (1 << (CTRL_CALM_MEASURE_SNACK_FEED - 1))
+
 static u8  g_soc_online              = 0;
 static u32 g_soc_last_heartbeat_tick = 0;
 
@@ -99,10 +104,10 @@ typedef struct
     u8 ownerVoiceDuration;  // 主人录音时长(秒)
     u8 volume;              // 音量值(百分比 0~100)
     u8 calmMode;            // 安抚模式: 0=自动调整, 1=人工干预
-    u8 enabledMask;         // 安抚措施使能位: bit0=音乐 bit1=主人录音 bit2=超声
+    u8 enabledMask;         // 安抚措施使能位: bit0=音乐 bit1=主人录音 bit2=超声 bit3=零食投喂
     u8 usMask;              // 超声子措施使能位: bit0=25kHz bit1=30kHz bit2=25&30kHz
-    u8 measureOrderCount;   // 安抚措施执行顺序项数(最多 3)
-    u8 measureOrder[3];     // 安抚措施执行顺序: 1=音乐 2=主人录音 3=超声
+    u8 measureOrderCount;   // 安抚措施执行顺序项数(最多 4)
+    u8 measureOrder[CTRL_CALM_MEASURE_MAX];     // 安抚措施执行顺序: 1=音乐 2=主人录音 3=超声 4=零食投喂
     u8 usOrderCount;        // 超声执行顺序项数(最多 3)
     u8 usOrder[3];          // 超声执行顺序: 1=25kHz 2=30kHz 3=25&30kHz
     u8 charging;            // 充电状态: 0=未充电, 1=充电中 (由 BLE MCU 本地维护)
@@ -528,6 +533,7 @@ static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payl
         g_ctrlState.measureOrder[0]    = 1;
         g_ctrlState.measureOrder[1]    = 3;
         g_ctrlState.measureOrder[2]    = 0;
+        g_ctrlState.measureOrder[3]    = 0;
         g_ctrlState.usOrderCount       = 3;
         g_ctrlState.usOrder[0]         = 1;
         g_ctrlState.usOrder[1]         = 2;
@@ -747,6 +753,17 @@ static void app_ctrl_evt_new_calm_record_from_soc(u8 cmdId, u8 seq, const u8 *pa
     app_ctrl_notify_new_record();
 }
 
+static void app_ctrl_evt_snack_feed_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)payload;
+    (void)payloadLen;
+    (void)userData;
+
+    BLE_LOG_D("[SOC_EVT] SNACK_FEED");
+}
+
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
 {
     (void)cmdId;
@@ -880,7 +897,7 @@ static void app_ctrl_rsp_calm_strategy_get_from_soc(u8 cmdId, u8 seq, const u8 *
                   g_ctrlState.calmMode,
                   g_ctrlState.enabledMask,
                   measureCnt);
-        if (measureCnt <= 3 && (u16)(idx + measureCnt + 1) <= payloadLen)
+        if (measureCnt <= CTRL_CALM_MEASURE_MAX && (u16)(idx + measureCnt + 1) <= payloadLen)
         {
             g_ctrlState.measureOrderCount = measureCnt;
             memset(g_ctrlState.measureOrder, 0, sizeof(g_ctrlState.measureOrder));
@@ -1692,7 +1709,11 @@ static int app_ctrl_handle_calm_strategy_set(u8 seq, u8 *payload, u16 len)
     u8 mode        = payload[0];
     u8 enabledMask = payload[1];
     u8 measureCnt  = payload[2];
-    if (mode > 1 || enabledMask == 0 || measureCnt > 3)
+    if (mode > 1 ||
+        enabledMask == 0 ||
+        (enabledMask & (u8)~CTRL_CALM_MEASURE_MASK_ALL) ||
+        (mode == 0 && (enabledMask & CTRL_CALM_MEASURE_MASK_SNACK)) ||
+        measureCnt > CTRL_CALM_MEASURE_MAX)
     {
         u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
@@ -1709,6 +1730,17 @@ static int app_ctrl_handle_calm_strategy_set(u8 seq, u8 *payload, u16 len)
         u8 rsp[2] = {CTRL_STATUS_LEN_ERROR, 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
         return -1;
+    }
+    for (u8 i = 0; i < measureCnt; i++)
+    {
+        u8 item = payload[idx + i];
+        if (item < 1 || item > CTRL_CALM_MEASURE_MAX ||
+            (mode == 0 && item == CTRL_CALM_MEASURE_SNACK_FEED))
+        {
+            u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+            app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_STRATEGY_SET, seq, rsp, sizeof(rsp));
+            return -1;
+        }
     }
     g_ctrlState.calmMode          = mode;
     g_ctrlState.enabledMask       = enabledMask;
@@ -2108,6 +2140,7 @@ void app_ctrl_init(void)
     app_uart_register_evt_handler(UART_SOC_ERROR_EVT,          app_ctrl_evt_soc_error_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_ULTRA_EMIT_EVT,        app_ctrl_evt_ultra_emit_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_NEW_CALM_RECORD_EVT,   app_ctrl_evt_new_calm_record_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_SNACK_FEED_EVT,        app_ctrl_evt_snack_feed_from_soc, 0);
 }
 
 void app_ctrl_time_task(void)
