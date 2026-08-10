@@ -36,6 +36,8 @@ CTRL_CMD_TIME_SET = 0x32
 CTRL_CMD_CALM_RECORD_GET = 0x33
 CTRL_CMD_CALM_RECORD_DELETE = 0x3A
 CTRL_CMD_UID_GET = 0x34
+CTRL_CMD_REWARD_FLAG_SET = 0x35
+CTRL_CMD_REWARD_FLAG_GET = 0x36
 CTRL_CMD_CALM_STRATEGY_SET = 0x37
 CTRL_CMD_CALM_STRATEGY_GET = 0x38
 CTRL_CMD_WORK_STATE_CHANGED = 0x80
@@ -75,6 +77,8 @@ CMD_NAME = {
     CTRL_CMD_CALM_RECORD_DELETE: "CALM_RECORD_DELETE",
     CTRL_CMD_TIME_SET: "TIME_SET",
     CTRL_CMD_CALM_STRATEGY_SET: "CALM_STRATEGY_SET",
+    CTRL_CMD_REWARD_FLAG_SET: "REWARD_FLAG_SET",
+    CTRL_CMD_REWARD_FLAG_GET: "REWARD_FLAG_GET",
     CTRL_CMD_UID_GET: "UID_GET",
     CTRL_CMD_CALM_STRATEGY_GET: "CALM_STRATEGY_GET",
     CTRL_CMD_WORK_STATE_CHANGED: "WORK_STATE_CHANGED",
@@ -435,9 +439,12 @@ class BleController:
             ts_val = int.from_bytes(p[5:9], "little", signed=False)
             ok_measure = p[9]
             ok_sub = p[10]
+            reward = p[11] if len(p) >= 12 else 0
             result_str = "成功" if result == 1 else "失败"
+            if result == 1 and reward:
+                result_str += "+零食奖励"
             m_name = MainWindow.MEASURE_NAMES.get(ok_measure, f"未知({ok_measure})")
-            return f"{base} session_id={sid} result={result}({result_str}) ok_measure={ok_measure}({m_name}) ts={ts_val}"
+            return f"{base} session_id={sid} result={result}({result_str}) ok_measure={ok_measure}({m_name}) reward={reward} ts={ts_val}"
 
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_NOTIFY and len(p) >= 1:
             return f"{base} recordCount={p[0]}"
@@ -796,8 +803,18 @@ class MainWindow(QtWidgets.QWidget):
         b4.addWidget(self.cmb_strategy_mode, 3, 1)
         b4.addWidget(btn_strategy_set, 4, 1)
         b4.addWidget(btn_strategy_get, 4, 2)
+        # 零食奖励开关（0x35/0x36）：安抚成功时是否附带投喂一次零食
+        self.chk_reward = QtWidgets.QCheckBox("零食奖励(成功时投喂)")
+        btn_reward_set = QtWidgets.QPushButton("奖励设置")
+        btn_reward_get = QtWidgets.QPushButton("奖励查询")
+        btn_reward_set.clicked.connect(self._send_reward_set)
+        btn_reward_get.clicked.connect(self._send_reward_get)
+        self.lbl_reward_query = QtWidgets.QLabel("零食奖励开关：-")
+        b4.addWidget(self.chk_reward, 5, 0)
+        b4.addWidget(btn_reward_set, 5, 1)
+        b4.addWidget(btn_reward_get, 5, 2)
         self.lbl_strategy_query = QtWidgets.QLabel("策略查询结果：-")
-        b4.addWidget(self.lbl_strategy_query, 5, 0, 1, 3)
+        b4.addWidget(self.lbl_strategy_query, 6, 0, 1, 3)
         grid.addWidget(box_strategy, 1, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
@@ -896,6 +913,17 @@ class MainWindow(QtWidgets.QWidget):
         )
         self._send(CTRL_CMD_CALM_STRATEGY_SET, payload, "CALM_STRATEGY_SET")
 
+    def _send_reward_set(self) -> None:
+        enabled = 1 if self.chk_reward.isChecked() else 0
+        self._send(
+            CTRL_CMD_REWARD_FLAG_SET,
+            bytes([enabled]),
+            f"REWARD_FLAG_SET enabled={enabled}",
+        )
+
+    def _send_reward_get(self) -> None:
+        self._send(CTRL_CMD_REWARD_FLAG_GET, b"", "REWARD_FLAG_GET")
+
     def _flush_log(self) -> None:
         self._flush_rsp_frames()
         lines = []
@@ -909,7 +937,12 @@ class MainWindow(QtWidgets.QWidget):
             self.log.verticalScrollBar().setValue(
                 self.log.verticalScrollBar().maximum()
             )
-        self.status.setText("已连接" if self.ctrl.connected else "未连接")
+        # 连接建立瞬间自动查询零食奖励开关，恢复 UI 勾选态
+        now_conn = self.ctrl.connected
+        if now_conn and not getattr(self, "_conn_prev", False):
+            self._send(CTRL_CMD_REWARD_FLAG_GET, b"", "REWARD_FLAG_GET")
+        self._conn_prev = now_conn
+        self.status.setText("已连接" if now_conn else "未连接")
         # 每 tick 刷新电池显示
         bat = getattr(self.ctrl, '_bat_percent', 0)
         chg = getattr(self.ctrl, '_charging', 0)
@@ -1017,6 +1050,14 @@ class MainWindow(QtWidgets.QWidget):
             )
             return
 
+        if frame.cmd_id in (CTRL_CMD_REWARD_FLAG_SET, CTRL_CMD_REWARD_FLAG_GET) and len(frame.payload) >= 2:
+            enabled = frame.payload[1]
+            self.chk_reward.setChecked(bool(enabled))
+            self.lbl_reward_query.setText(
+                f"零食奖励开关：{'开启' if enabled else '关闭'}"
+            )
+            return
+
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_GET:
             self._apply_record_rsp(frame)
             return
@@ -1105,7 +1146,10 @@ class MainWindow(QtWidgets.QWidget):
             sid = int.from_bytes(p[0:4], "little", signed=False)
             result = p[4]
             ok_measure = p[9]
+            reward = p[11] if len(p) >= 12 else 0
             result_str = "✅ 成功" if result == 1 else "❌ 失败"
+            if result == 1 and reward:
+                result_str += " 🦴含零食奖励"
             m_name = self.MEASURE_NAMES.get(ok_measure, f"未知({ok_measure})")
             self._soothe_result_pending = False
             self.lbl_soothe_result.setText(f"结果：{result_str} (有效措施={m_name})")
@@ -1170,12 +1214,15 @@ class MainWindow(QtWidgets.QWidget):
             return
 
         # 格式 9 字节: [status, entryIdx, totalEntries, session_id(1), type, ts(4)]
+        # 最后一条结果条目（SUCCESS/FAIL）为 10 字节，末尾追加 reward(1)
         if len(p) >= 9 and p[0] == 0x00:
             entry_idx = p[1]
             total_entries = p[2]
             session_id = p[3]
             entry_type = p[4]
             ts = int.from_bytes(p[5:9], "little", signed=False)
+            reward = p[9] if len(p) >= 10 else 0
+            is_last = (entry_idx + 1) >= total_entries
             ts_str = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
             if entry_idx == 0:
@@ -1196,10 +1243,12 @@ class MainWindow(QtWidgets.QWidget):
                        "❌" if tn == "FAIL" else (
                        "🎵" if tn in ("MUSIC", "OWNER") else "📡")))
                 lines.append(f"  {icon} [{i}] {tn}  @{ts_s}")
+            if is_last and reward:
+                lines.append("  🦴 本次安抚成功附带零食投喂奖励")
             self.txt_record_detail.setText("\n".join(lines))
 
             info = f"记录信息：第 {entry_idx+1}/{total_entries} 条, session_id={session_id}"
-            if entry_idx + 1 >= total_entries:
+            if is_last:
                 info += " (记录完整)"
             self.lbl_record_info.setText(info)
             return

@@ -55,6 +55,9 @@ enum
     CTRL_CMD_TIME_SET = 0x32,  // set device time (YYYY-MM-DD HH:MM:SS)
     CTRL_CMD_UID_GET  = 0x34,  // get flash UID (16 bytes, split into 2 responses)
 
+    CTRL_CMD_REWARD_FLAG_SET = 0x35,  // 零食奖励开关设置 (flash 持久化 + 同步 SOC)
+    CTRL_CMD_REWARD_FLAG_GET = 0x36,  // 零食奖励开关查询
+
     // Factory reset: clear owner voice, comfort config, comfort records
     CTRL_CMD_FACTORY_RESET = 0x56,
 

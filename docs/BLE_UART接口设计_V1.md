@@ -216,6 +216,7 @@ Byte6.. payload
   - `count`：本次查询返回的总条数（不超过 `maxCount`）。
   - `index`：当前这包记录在本次查询结果中的序号（0-based）。
   - `endTs=0xFFFFFFFF` 表示该条记录正在运行（尚未结束）。
+- 结果奖励字段：实际实现按 entry 列表返回（见 `ctrl_service_doc.md` §4.11），最后一条结果条目（SUCCESS/FAIL）附加 `reward` 字节，`0x01` 表示本次安抚成功附带零食投喂奖励。
 
 14) `0x30 CALM_MODE_SET`  
 - 请求：`[mode]`  
@@ -262,7 +263,18 @@ Byte6.. payload
 
 19) `0x34 UID_GET`  
 
-20) `0x50 FACTORY_RESET`  
+20) `0x35 REWARD_FLAG_SET`  
+- 功能：设置「零食奖励」功能开关（安抚成功时是否附带投喂一次零食）。  
+- 请求：`[enabled]`（0=关，非0=开）  
+- 响应：`[status, enabledApplied]`
+- 说明：该开关由 MCU 保存在本地 Flash，每次启动时恢复，并同步给 SOC 用于成功判定。
+
+21) `0x36 REWARD_FLAG_GET`  
+- 功能：查询当前零食奖励功能开关状态。  
+- 请求：空  
+- 响应：`[status, enabled]`
+
+22) `0x50 FACTORY_RESET`  
 - 功能：恢复出厂（清主人录音、清安抚记录、清安抚配置并恢复默认）。  
 - 请求：`[reason]`（1=解绑触发；其它值预留）
 - 响应：`[status]`
@@ -285,8 +297,9 @@ Byte6.. payload
   - `subType`：超声时对应 1/2/3，其它填 0
 
 4) `0x83 CALM_SESSION_RESULT`  
-- `payload=[sessionId(4B), result, endTs(4B), successMeasureType, successSubType]`
+- `payload=[sessionId(4B), result, endTs(4B), successMeasureType, successSubType, reward]`
   - `result`：0失败，1成功
+  - `reward`：0x01=本次成功附带零食投喂奖励（仅在 `result=1` 且奖励开关开启且最后措施非零食投喂时出现；奖励投喂不属于安抚流程措施）
 
 5) `0x84 OWNER_REC_STATUS`  
 - `payload=[eventType, status, durationSec]`

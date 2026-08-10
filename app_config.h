@@ -35,6 +35,10 @@
 // Radar boundary storage (one 4K sector)
 #define BAT_PERCENT_FLASH_ADDR                        USER_FLASH_START_ADDR
 
+// 零食奖励开关存储 (用户区第二个 4K 扇区: 0x1A000)
+#define REWARD_FLAG_FLASH_ADDR                        (BAT_PERCENT_FLASH_ADDR + 0x1000)
+#define REWARD_FLAG_FLASH_MAGIC                       0x52465744u  /* "RWFD" */
+
 #define BLE_APP_SECURITY_ENABLE      				0
 #define	BLE_OTA_SERVER_ENABLE						0
 #define	BLE_HID_SERVER_ENABLE						0

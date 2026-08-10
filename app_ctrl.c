@@ -43,11 +43,79 @@ extern u8 customCtrlLogCCC[2];
 #define CTRL_CALM_MEASURE_MASK_ALL    0x0F
 #define CTRL_CALM_MEASURE_MASK_SNACK  (1 << (CTRL_CALM_MEASURE_SNACK_FEED - 1))
 
+/* ===================== 零食奖励开关（flash 持久化，仿 app_adc_mon 电量存储） ===================== */
+typedef struct
+{
+    u32 magic;
+    u8  enabled;
+    u8  reserved[3];
+    u32 crc;
+} reward_flag_flash_t;
+
+static u32 app_ctrl_flash_crc32(const u8 *data, u32 len)
+{
+    u32 crc = 0xFFFFFFFFu;
+    for (u32 i = 0; i < len; i++)
+    {
+        crc ^= data[i];
+        for (u8 b = 0; b < 8; b++)
+        {
+            if (crc & 1u)
+                crc = (crc >> 1) ^ 0xEDB88320u;
+            else
+                crc >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+/* 从 flash 加载零食奖励开关；无效/无记录返回默认 0（关闭） */
+static u8 app_ctrl_reward_flag_load(void)
+{
+    reward_flag_flash_t stored;
+
+    flash_read_page(REWARD_FLAG_FLASH_ADDR, sizeof(stored), (u8 *)&stored);
+    if (stored.magic != REWARD_FLAG_FLASH_MAGIC)
+    {
+        return 0;
+    }
+    u32 crc = app_ctrl_flash_crc32((const u8 *)&stored, sizeof(stored) - sizeof(stored.crc));
+    if (crc != stored.crc)
+    {
+        return 0;
+    }
+    return stored.enabled ? 1 : 0;
+}
+
+/* 将零食奖励开关保存到 flash（每次设置时更新，启动时读取恢复） */
+static void app_ctrl_reward_flag_save(u8 enabled)
+{
+    reward_flag_flash_t stored;
+
+    stored.magic       = REWARD_FLAG_FLASH_MAGIC;
+    stored.enabled     = enabled ? 1 : 0;
+    stored.reserved[0] = 0;
+    stored.reserved[1] = 0;
+    stored.reserved[2] = 0;
+    stored.crc = app_ctrl_flash_crc32((const u8 *)&stored, sizeof(stored) - sizeof(stored.crc));
+    flash_erase_sector(REWARD_FLAG_FLASH_ADDR);
+    flash_write_page(REWARD_FLAG_FLASH_ADDR, sizeof(stored), (u8 *)&stored);
+}
+
 static u8  g_soc_online              = 0;
 static u32 g_soc_last_heartbeat_tick = 0;
 
+/* SOC 上线（开机首次心跳 / 重启恢复）后，奖励开关补发窗口次数：每秒 1 次，共 5 秒 */
+#define REWARD_SYNC_BOOT_COUNT 5
+static u8 g_reward_sync_left = 0;
+
 static void app_ctrl_mark_soc_online(void)
 {
+    if (!g_soc_online)
+    {
+        /* SOC 从离线恢复上线：开启 5 秒补发窗口，让 SOC 恢复正确的奖励开关值 */
+        g_reward_sync_left = REWARD_SYNC_BOOT_COUNT;
+    }
     g_soc_online              = 1;
     g_soc_last_heartbeat_tick = clock_time();
 }
@@ -111,6 +179,7 @@ typedef struct
     u8 usOrderCount;        // 超声执行顺序项数(最多 3)
     u8 usOrder[3];          // 超声执行顺序: 1=25kHz 2=30kHz 3=25&30kHz
     u8 charging;            // 充电状态: 0=未充电, 1=充电中 (由 BLE MCU 本地维护)
+    u8 rewardEnabled;       // 零食奖励功能开关: 0=关, 1=开 (flash 持久化, 启动时恢复)
 } app_ctrl_state_t;
 
 static app_ctrl_state_t g_ctrlState = {
@@ -128,6 +197,13 @@ static app_ctrl_state_t g_ctrlState = {
     .usOrderCount       = 3,
     .usOrder            = {1, 2, 3},
 };
+
+/* 将当前奖励开关同步给 SOC（SET 时立即调用；上线后 5 秒窗口内由 time_task 补发） */
+static void app_ctrl_soc_sync_reward_flag(void)
+{
+    u8 payload[1] = {g_ctrlState.rewardEnabled ? 1 : 0};
+    app_uart_send_cmd(UART_SOC_REWARD_FLAG_NOTIFY, payload, 1, NULL);
+}
 
 typedef struct
 {
@@ -538,6 +614,14 @@ static void app_ctrl_rsp_factory_reset_from_soc(u8 cmdId, u8 seq, const u8 *payl
         g_ctrlState.usOrder[0]         = 1;
         g_ctrlState.usOrder[1]         = 2;
         g_ctrlState.usOrder[2]         = 3;
+
+        /* 恢复出厂：零食奖励开关复位为关闭（清历史偏好） */
+        if (g_ctrlState.rewardEnabled != 0)
+        {
+            g_ctrlState.rewardEnabled = 0;
+            app_ctrl_reward_flag_save(0);
+            app_ctrl_soc_sync_reward_flag();
+        }
 
         u8 rsp[1] = {CTRL_STATUS_OK};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_FACTORY_RESET, ctx->bleSeq, rsp, sizeof(rsp));
@@ -977,12 +1061,14 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
      *   payload[0]   = status
      *   payload[1]   = session_id (1 byte)
      *   payload[2]   = entryCount
+     *   payload[3]   = reward (1=本次成功附带零食投喂奖励, 仅结果记录字段)
      *   后续每条 entry = [type(1B), ts(4B)] = 5B
      *
      * BLE 响应格式（9 字节，每条 entry 一条 notify）：
      *   [0] status, [1] entryIdx, [2] totalEntriesInRecord,
      *   [3] session_id (1B),
      *   [4] type, [5-8] ts (u32 LE)
+     *   最后一条结果条目（SUCCESS/FAIL）为 10 字节，[9] = reward
      */
     session_id = payload[1];
     entryCnt   = payload[2];
@@ -998,6 +1084,13 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
     }
 
     u16 pos = 3;  /* status(1) + session_id(1) + entryCount(1) */
+    u8  reward = 0;
+    if (payloadLen >= 4)
+    {
+        reward = payload[3];
+        pos    = 4;
+    }
+
     for (u8 i = 0; i < entryCnt; i++)
     {
         if ((u16)(pos + 5) > payloadLen)
@@ -1007,7 +1100,8 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
             break;
         }
 
-        u8 rsp[9];
+        u8 rsp[10];
+        u8 rlen = 9;
         rsp[0] = CTRL_STATUS_OK;
         rsp[1] = i;                /* entryIdx */
         rsp[2] = entryCnt;         /* totalEntriesInRecord */
@@ -1017,10 +1111,17 @@ static void app_ctrl_rsp_calm_record_get_from_soc(u8 cmdId, u8 seq, const u8 *pa
         rsp[6] = payload[pos + 2];
         rsp[7] = payload[pos + 3];
         rsp[8] = payload[pos + 4]; /* ts MSB */
+        if (i == (u8)(entryCnt - 1))
+        {
+            /* 结果条目（SUCCESS/FAIL）附加零食奖励标记，帧长 10B */
+            rsp[9] = reward;
+            rlen   = 10;
+        }
 
-        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET entry %d/%d type=0x%02x session_id=%d",
-                  i, entryCnt, payload[pos], session_id);
-        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, sizeof(rsp));
+        BLE_LOG_D("[SOC_RSP] CALM_RECORD_GET entry %d/%d type=0x%02x session_id=%d%s",
+                  i, entryCnt, payload[pos], session_id,
+                  (rlen == 10) ? (reward ? " reward=1" : " reward=0") : "");
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_RECORD_GET, ctx->bleSeq, rsp, rlen);
         sleep_us(8000);
 
         pos += 5;
@@ -1348,6 +1449,41 @@ static int app_ctrl_handle_uid_get(u8 seq, u8 *payload, u16 len)
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_UID_GET, seq, rsp, sizeof(rsp));
     }
 
+    return 0;
+}
+
+static int app_ctrl_handle_reward_flag_set(u8 seq, u8 *payload, u16 len)
+{
+    if (len < 1)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_REWARD_FLAG_SET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    u8 on = payload[0] ? 1 : 0;
+    g_ctrlState.rewardEnabled = on;
+    app_ctrl_reward_flag_save(on); /* 本地 flash 持久化，每次启动时恢复 */
+    BLE_LOG_D("[CTRL] REWARD_FLAG_SET enabled=%d", on);
+    app_ctrl_soc_sync_reward_flag(); /* 立即同步 SOC */
+
+    u8 rsp[2] = {CTRL_STATUS_OK, on};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_REWARD_FLAG_SET, seq, rsp, sizeof(rsp));
+    return 0;
+}
+
+static int app_ctrl_handle_reward_flag_get(u8 seq, u8 *payload, u16 len)
+{
+    (void)payload;
+    if (len != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_REWARD_FLAG_GET, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+
+    u8 rsp[2] = {CTRL_STATUS_OK, g_ctrlState.rewardEnabled ? 1 : 0};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_REWARD_FLAG_GET, seq, rsp, sizeof(rsp));
     return 0;
 }
 
@@ -2128,6 +2264,9 @@ void app_ctrl_init(void)
     memset(g_ctrlTxBuf, 0, sizeof(g_ctrlTxBuf));
     g_ctrlSeq                 = 0;
     g_ctrlState.btLinked      = 1;
+    /* 每次启动时从 flash 恢复零食奖励开关（无效数据回落为 0=关闭） */
+    g_ctrlState.rewardEnabled = app_ctrl_reward_flag_load();
+    BLE_LOG_D("[CTRL] REWARD_FLAG loaded from flash=%d", g_ctrlState.rewardEnabled);
     g_timeCache.valid         = 0;
     g_soc_online              = 0;
     g_soc_last_heartbeat_tick = 0;
@@ -2165,7 +2304,15 @@ void app_ctrl_time_task(void)
             payload[0] = g_ble_connected;
             payload[1] = g_ctrlState.powerState;
             app_uart_send_cmd(UART_SOC_BT_LINK_NOTIFY, payload, 2, NULL);
-            
+
+            /* 奖励开关仅在 SOC 上线后的 5 秒窗口内每秒补发（开机/SOC 重启恢复用），
+             * 窗口结束（5 次）后不再周期性发送；SET 时另有即时同步。 */
+            if (g_reward_sync_left > 0)
+            {
+                app_ctrl_soc_sync_reward_flag();
+                g_reward_sync_left--;
+            }
+
             // Poll state changes and push to APP via EVENT
             app_ctrl_state_try_push_event();
         }
@@ -2259,6 +2406,14 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_UID_GET:
         BLE_LOG_D("CTRL_CMD_UID_GET");
         app_ctrl_handle_uid_get(seq, payload, payLen);
+        break;
+    case CTRL_CMD_REWARD_FLAG_SET:
+        BLE_LOG_D("CTRL_CMD_REWARD_FLAG_SET");
+        app_ctrl_handle_reward_flag_set(seq, payload, payLen);
+        break;
+    case CTRL_CMD_REWARD_FLAG_GET:
+        BLE_LOG_D("CTRL_CMD_REWARD_FLAG_GET");
+        app_ctrl_handle_reward_flag_get(seq, payload, payLen);
         break;
     case CTRL_CMD_VOLUME_SET:
         BLE_LOG_D("CTRL_CMD_VOLUME_SET");

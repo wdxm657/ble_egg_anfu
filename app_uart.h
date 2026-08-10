@@ -29,6 +29,7 @@ enum{
     UART_SOC_CALM_STRATEGY_SET  = 0x31,
     UART_SOC_CALM_STRATEGY_GET  = 0x33,
     UART_SOC_TIME_SET           = 0x32,
+    UART_SOC_REWARD_FLAG_NOTIFY = 0x34,  /* MCU -> SOC: 零食奖励功能开关同步 [enabled(1)] */
     UART_SOC_LOG_PULL           = 0x40,
     UART_SOC_CALM_RECORD_GET    = 0x41,
     UART_SOC_CALM_RECORD_DELETE = 0x42,
