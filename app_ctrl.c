@@ -238,20 +238,20 @@ u8 get_work_state(){
  */
 static void app_ctrl_state_try_push_event(void)
 {
-    u8 cur[10];
+    u8 cur[7];
     cur[0] = CTRL_STATUS_OK;
     cur[1] = g_ctrlState.powerState;
     cur[2] = g_ctrlState.workState;
     cur[3] = g_ctrlState.btLinked;
     cur[4] = g_ctrlState.volume;
     cur[5] = g_ctrlState.calmMode;
-    cur[6] = g_ctrlState.enabledMask;
-    cur[7] = g_ctrlState.usMask;
+    // cur[6] = g_ctrlState.enabledMask;
+    // cur[7] = g_ctrlState.usMask;
     if (g_ctrlState.workState == 3)
     {
-        cur[8] = s_pushed_status[8];
+        cur[6] = s_pushed_status[6];
     }else{
-        cur[8] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
+        cur[6] = app_adc_mon_is_charging();  /* MCU 本地充电状态 */
     }
 
     if (memcmp(s_pushed_status, cur, sizeof(cur)) == 0)
@@ -266,9 +266,9 @@ static void app_ctrl_state_try_push_event(void)
     if (cur[3] != s_pushed_status[3]) { BLE_LOG_D("  bt=%d->%d", s_pushed_status[3], cur[3]); changed = 1; }
     if (cur[4] != s_pushed_status[4]) { BLE_LOG_D("  vol=%d->%d", s_pushed_status[4], cur[4]); changed = 1; }
     if (cur[5] != s_pushed_status[5]) { BLE_LOG_D("  mode=%d->%d", s_pushed_status[5], cur[5]); changed = 1; }
-    if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[6], cur[6]); changed = 1; }
-    if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
-    if (cur[8] != s_pushed_status[8]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[8], cur[8]); changed = 1; }
+    // if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  enabledMask=0x%02x->0x%02x", s_pushed_status[6], cur[6]); changed = 1; }
+    // if (cur[7] != s_pushed_status[7]) { BLE_LOG_D("  usMask=0x%02x->0x%02x", s_pushed_status[7], cur[7]); changed = 1; }
+    if (cur[6] != s_pushed_status[6]) { BLE_LOG_D("  charging=%d->%d", s_pushed_status[6], cur[6]); changed = 1; }
 
     memcpy(s_pushed_status, cur, sizeof(cur));
     if(changed) {
@@ -348,19 +348,16 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
             // SOC 已返回 0-100，直接使用
             g_ctrlState.volume = payload[4];
             if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
-            g_ctrlState.calmMode        = payload[5];
-            g_ctrlState.enabledMask     = payload[6];
+            // g_ctrlState.calmMode        = payload[5];
+            // g_ctrlState.enabledMask     = payload[6];
             if (payloadLen >= 8)
             {
                 g_ctrlState.usMask = payload[7];
             }
-            BLE_LOG_D("[SOC_RSP] STATUS_GET  work=%d vol=%d mode=%d enabled=0x%02x us=0x%02x",
+            BLE_LOG_D("[SOC_RSP] STATUS_GET  work=%d vol=%d mode=%d",
                       payload[2],
                       payload[4],
-                      payload[5],
-                      payload[6],
-                      payload[7],
-                      (payloadLen >= 8) ? payload[7] : 0);
+                      payload[5]);
         }
         else
         {
@@ -372,15 +369,15 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
         BLE_LOG_D("[SOC_RSP] STATUS_GET too short len=%d", payloadLen);
     }
 
-    u8 rsp[9] = {
+    u8 rsp[7] = {
         CTRL_STATUS_OK,
         g_ctrlState.powerState,
         g_ctrlState.workState,
         g_ctrlState.btLinked,
         g_ctrlState.volume,
         g_ctrlState.calmMode,
-        g_ctrlState.enabledMask,
-        g_ctrlState.usMask,
+        // g_ctrlState.enabledMask,
+        // g_ctrlState.usMask,
         app_adc_mon_is_charging(),  /* MCU 本地充电状态 */
     };
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_STATUS_GET, ctx->bleSeq, rsp, sizeof(rsp));
