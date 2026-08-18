@@ -43,6 +43,8 @@
 #define MY_RF_POWER_INDEX         RF_POWER_P2p87dBm
 #define MY_DIRECT_ADV_TIME        10000000
 #define BLE_DEVICE_ADDRESS_TYPE   BLE_DEVICE_ADDRESS_PUBLIC
+/* 广播开启门控：MCU 与 AI SOC 串口通信建立的最长等待时间，超时判定硬件故障并重启设备 */
+#define SOC_LINK_WAIT_TIMEOUT_US  15000000  // 15 s
 u32 advertise_begin_tick;
 u32 g_time_tick_last = 0;
 #if (PM_DEEPSLEEP_ENABLE)
@@ -53,6 +55,9 @@ u32 latest_user_event_tick;
 own_addr_type_t app_own_address_type = OWN_ADDRESS_PUBLIC;
 
 static u8 g_app_power_on = 0;
+
+/* BLE 广播是否已在 MCU 与 AI SOC 串口通信建立成功后打开（0: 未打开, 1: 已打开） */
+static u8 g_adv_enabled = 0;
 
 void app_set_power_state(u8 on)
 {
@@ -881,7 +886,9 @@ _attribute_no_inline_ void user_init_normal(void)
         LOG_D("[APP][INI] reading flash UID error");
     }
     bls_ll_setScanRspData((u8 *)tbl_scanRsp, sizeof(tbl_scanRsp));
-    bls_ll_setAdvEnable(BLC_ADV_ENABLE);  // ADV enable
+    /* 广播不再在此处无条件打开：
+     * 需等 MCU 与 AI SOC 串口通信建立成功后才开启广播（见 app_adv_gate_check()），
+     * 最长等待 SOC_LINK_WAIT_TIMEOUT_US(15s)，超时判定硬件故障并重启设备 */
 // scan setting
 #if (SCAN_ENABLE)
     blc_hci_le_setEventMask_cmd(HCI_LE_EVT_MASK_ADVERTISING_REPORT);
@@ -935,15 +942,16 @@ _attribute_no_inline_ void user_init_normal(void)
 #endif
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    app_ultrasonic_init();
-    app_input_init();
-    app_adc_mon_init();
-
     /* Check if any Stack(Controller & Host) Initialization error after all BLE initialization done.
      * attention that code will stuck in "while(1)" if any error detected in initialization, user need find what error happens and then fix it */
     blc_app_checkControllerHostInitialization();
     advertise_begin_tick = clock_time();
+
+    app_ultrasonic_init();
+    app_input_init();
+    app_adc_mon_init();
 }
+
 #if (PM_DEEPSLEEP_RETENTION_ENABLE)
 /**
  * @brief		user initialization when MCU wake_up from deepSleep_retention mode
@@ -1066,6 +1074,39 @@ void                           app_flash_protection_operation(u8 flash_op_evt, u
     /* add more flash protection operation for your application if needed */
 }
 #endif
+/**
+ * @brief      BLE 广播开启门控（在 main_loop 中周期调用）
+ * @note       广播不随初始化立即打开，而是等到 MCU 与 AI SOC 串口通信建立成功
+ *             （以收到 SOC 心跳、app_ctrl_is_soc_online()==1 为准）后才打开。
+ *             若 SOC_LINK_WAIT_TIMEOUT_US(15s) 内未能建立通信，判定硬件故障，
+ *             直接重启设备。
+ */
+static void app_adv_gate_check(void)
+{
+    if (g_adv_enabled)
+    {
+        return;
+    }
+
+    if (app_ctrl_is_soc_online())
+    {
+        /* MCU 与 SOC 串口通信正常，打开广播 */
+        bls_ll_setAdvEnable(BLC_ADV_ENABLE);
+        g_adv_enabled = 1;
+        LOG_D("[APP][ADV] SOC handshake OK, ADV enable");
+    }
+    else if (clock_time_exceed(advertise_begin_tick, SOC_LINK_WAIT_TIMEOUT_US))
+    {
+        /* 15s 内未建立 MCU 与 SOC 串口通信，判定硬件故障，重启设备 */
+        LOG_D("[APP][ADV] SOC handshake timeout(>15s), hardware fault, reboot!");
+        sleep_us(100000);  // 预留时间让日志通过 UART 输出
+        start_reboot();
+        while (1)
+        {
+            /* start_reboot() 不应返回，防御性死循环 */
+        }
+    }
+}
 _attribute_data_retention_ static u8 s_bat_percent_last_reported = 0xFF;
 /**
  * @brief     BLE main loop
@@ -1089,6 +1130,10 @@ void main_loop(void)
 
     app_uart_task();
     app_ctrl_time_task();
+
+    /* 广播门控：SOC 串口通信建立成功后开启广播，15s 超时则重启 */
+    app_adv_gate_check();
+
     app_input_poll();
     app_adc_mon_poll();
 
