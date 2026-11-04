@@ -44,6 +44,7 @@ enum
     CTRL_CMD_OWNER_REC_SAVE      = 0x26,  // 保存录音: 将 tmp 目录下的音频移到播放目录
     CTRL_CMD_CALM_MUSIC_PLAY      = 0x27,  // start calming music playback on SOC
     CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x28,  // stop calming music playback on SOC
+    CTRL_CMD_CALM_MUSIC_SELECT    = 0x29,  // select calming music file [index: 0=calm1, 1=calm2]
 
     CTRL_CMD_CALM_MODE_SET     = 0x30,
     CTRL_CMD_CALM_MODE_GET     = 0x31,
@@ -78,6 +79,7 @@ enum
     CTRL_CMD_CALM_RECORD_NOTIFY     = 0x84,  // SOC 通知 APP 有安抚记录可用 event [recordCount(1)]
     CTRL_CMD_SOC_LOG_DATA           = 0x85,  // SOC 日志数据事件
     CTRL_CMD_SOC_ERROR              = 0x86,  // SOC 错误通知事件
+    CTRL_CMD_CALM_MUSIC_DONE        = 0x87,  // SOC 安抚音频自然播放完成 [audioIndex(1)]
 };
 
 // Error codes for response payload[0]

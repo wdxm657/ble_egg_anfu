@@ -30,6 +30,7 @@ CTRL_CMD_OWNER_REC_PLAY_STOP = 0x25
 CTRL_CMD_OWNER_REC_SAVE = 0x26
 CTRL_CMD_CALM_MUSIC_PLAY = 0x27
 CTRL_CMD_CALM_MUSIC_PLAY_STOP = 0x28
+CTRL_CMD_CALM_MUSIC_SELECT = 0x29
 CTRL_CMD_CALM_MODE_SET = 0x30
 CTRL_CMD_CALM_MODE_GET = 0x31
 CTRL_CMD_TIME_SET = 0x32
@@ -45,6 +46,7 @@ CTRL_CMD_SOC_SESSION_START = 0x81
 CTRL_CMD_SOC_MEASURE_EXEC = 0x82
 CTRL_CMD_SOC_SESSION_RESULT = 0x83
 CTRL_CMD_CALM_RECORD_NOTIFY = 0x84  # 安抚记录可用通知 event（设备→APP）
+CTRL_CMD_CALM_MUSIC_DONE = 0x87  # 安抚音频播放完成 event（设备→APP）
 CTRL_CMD_SOC_ERROR = 0x86
 CTRL_CMD_ULTRA_SET_25K = 0x60
 CTRL_CMD_ULTRA_SET_30K = 0x61
@@ -73,6 +75,7 @@ CMD_NAME = {
     CTRL_CMD_CALM_MODE_GET: "CALM_MODE_GET",
     CTRL_CMD_CALM_MUSIC_PLAY: "CALM_MUSIC_PLAY",
     CTRL_CMD_CALM_MUSIC_PLAY_STOP: "CALM_MUSIC_PLAY_STOP",
+    CTRL_CMD_CALM_MUSIC_SELECT: "CALM_MUSIC_SELECT",
     CTRL_CMD_CALM_RECORD_GET: "CALM_RECORD_GET",
     CTRL_CMD_CALM_RECORD_DELETE: "CALM_RECORD_DELETE",
     CTRL_CMD_TIME_SET: "TIME_SET",
@@ -86,6 +89,7 @@ CMD_NAME = {
     CTRL_CMD_SOC_MEASURE_EXEC: "SOC_MEASURE_EXEC",
     CTRL_CMD_SOC_SESSION_RESULT: "SOC_SESSION_RESULT",
     CTRL_CMD_CALM_RECORD_NOTIFY: "CALM_RECORD_NOTIFY",
+    CTRL_CMD_CALM_MUSIC_DONE: "CALM_MUSIC_DONE",
     CTRL_CMD_SOC_ERROR: "SOC_ERROR",
     CTRL_CMD_ULTRA_SET_25K: "ULTRA_SET_25K",
     CTRL_CMD_ULTRA_SET_30K: "ULTRA_SET_30K",
@@ -291,6 +295,7 @@ class BleController:
         CTRL_CMD_SOC_MEASURE_EXEC,
         CTRL_CMD_SOC_SESSION_RESULT,
         CTRL_CMD_CALM_RECORD_NOTIFY,
+        CTRL_CMD_CALM_MUSIC_DONE,
         CTRL_CMD_SOC_ERROR,
     }
 
@@ -315,6 +320,10 @@ class BleController:
             return f"{base} pwr={pwr} work={ws} bt={bt} vol={vol} mode={mode} enabled=0x{em:02X} us=0x{um:02X}"
         if frame.cmd_id == CTRL_CMD_VOLUME_GET and len(frame.payload) >= 2:
             return f"{base} volume={frame.payload[1]}"
+        if frame.cmd_id == CTRL_CMD_CALM_MUSIC_SELECT and len(frame.payload) >= 2:
+            file_name = ("calm1.wav", "calm2.wav")
+            index = frame.payload[1]
+            return f"{base} index={index} file={file_name[index] if index < len(file_name) else '?'}"
         if frame.cmd_id == CTRL_CMD_OWNER_REC_PLAY and len(frame.payload) >= 1:
             src_name = ["saved", "tmp"]
             src = frame.payload[1] if len(frame.payload) >= 2 else 0
@@ -448,6 +457,10 @@ class BleController:
 
         if frame.cmd_id == CTRL_CMD_CALM_RECORD_NOTIFY and len(p) >= 1:
             return f"{base} recordCount={p[0]}"
+        if frame.cmd_id == CTRL_CMD_CALM_MUSIC_DONE and len(p) >= 1:
+            files = ("calm1.wav", "calm2.wav")
+            index = p[0]
+            return f"{base} index={index} file={files[index] if index < len(files) else '?'}"
 
         return f"{base} payload={p.hex()}"
 
@@ -681,17 +694,28 @@ class MainWindow(QtWidgets.QWidget):
 
         # 安抚音乐播放
         box_music = QtWidgets.QGroupBox("安抚音乐")
-        bm = QtWidgets.QVBoxLayout(box_music)
+        bm = QtWidgets.QGridLayout(box_music)
+        bm.addWidget(QtWidgets.QLabel("音频文件:"), 0, 0)
+        self.cmb_calm_music = QtWidgets.QComboBox()
+        self.cmb_calm_music.addItem("安抚音频 1 (calm1.wav)", 0)
+        self.cmb_calm_music.addItem("安抚音频 2 (calm2.wav)", 1)
+        bm.addWidget(self.cmb_calm_music, 0, 1, 1, 2)
+        btn_music_select = QtWidgets.QPushButton("设置所选音频")
+        btn_music_query = QtWidgets.QPushButton("查询当前音频")
         btn_music_play = QtWidgets.QPushButton("开始播放安抚音乐")
         btn_music_stop = QtWidgets.QPushButton("停止播放安抚音乐")
+        btn_music_select.clicked.connect(self._send_calm_music_select)
+        btn_music_query.clicked.connect(self._query_calm_music_select)
         btn_music_play.clicked.connect(
             lambda: self._send(CTRL_CMD_CALM_MUSIC_PLAY, b"", "CALM_MUSIC_PLAY")
         )
         btn_music_stop.clicked.connect(
             lambda: self._send(CTRL_CMD_CALM_MUSIC_PLAY_STOP, b"", "CALM_MUSIC_PLAY_STOP")
         )
-        bm.addWidget(btn_music_play)
-        bm.addWidget(btn_music_stop)
+        bm.addWidget(btn_music_select, 1, 0, 1, 3)
+        bm.addWidget(btn_music_play, 2, 0, 1, 2)
+        bm.addWidget(btn_music_stop, 2, 2)
+        bm.addWidget(btn_music_query, 3, 0, 1, 3)
         grid.addWidget(box_music, 0, 2)
 
         # 超声波模块控制
@@ -868,6 +892,17 @@ class MainWindow(QtWidgets.QWidget):
         src = int(self.cmb_play_src.currentData())
         self._send(CTRL_CMD_OWNER_REC_PLAY, bytes([src]), f"OWNER_REC_PLAY src={src}")
 
+    def _send_calm_music_select(self) -> None:
+        index = int(self.cmb_calm_music.currentData())
+        self._send(
+            CTRL_CMD_CALM_MUSIC_SELECT,
+            bytes([index]),
+            f"CALM_MUSIC_SELECT index={index}",
+        )
+
+    def _query_calm_music_select(self) -> None:
+        self._send(CTRL_CMD_CALM_MUSIC_SELECT, b"", "CALM_MUSIC_SELECT query")
+
     def _send_mode_set(self) -> None:
         mode = int(self.cmb_mode.currentData())
         self._send(CTRL_CMD_CALM_MODE_SET, bytes([mode]), f"CALM_MODE_SET mode={mode}")
@@ -984,6 +1019,10 @@ class MainWindow(QtWidgets.QWidget):
 
         status = frame.payload[0]
         if status != 0x00:
+            return
+
+        if frame.cmd_id == CTRL_CMD_CALM_MUSIC_SELECT and len(frame.payload) >= 2:
+            self.cmb_calm_music.setCurrentIndex(self.cmb_calm_music.findData(frame.payload[1]))
             return
 
         if frame.cmd_id == CTRL_CMD_STATUS_GET and len(frame.payload) >= 8:

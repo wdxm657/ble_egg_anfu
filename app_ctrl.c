@@ -312,6 +312,7 @@ _attribute_data_retention_ static app_ctrl_record_req_ctx_t g_ctx_calm_record_ge
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_record_delete;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_music_play;
 _attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_music_play_stop;
+_attribute_data_retention_ static app_ctrl_ble_req_ctx_t    g_ctx_calm_music_select;
 
 static void app_ctrl_time_cache_update(void)
 {
@@ -843,6 +844,29 @@ static void app_ctrl_evt_snack_feed_from_soc(u8 cmdId, u8 seq, const u8 *payload
     (void)userData;
 
     BLE_LOG_D("[SOC_EVT] SNACK_FEED");
+}
+
+static void app_ctrl_evt_calm_music_done_from_soc(
+    u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    (void)userData;
+
+    if (!payload || payloadLen < 1 || payload[0] > 1)
+    {
+        BLE_LOG_D("[SOC_EVT] CALM_MUSIC_DONE invalid payload");
+        return;
+    }
+    if (!g_ble_connected)
+    {
+        BLE_LOG_D("[SOC_EVT] CALM_MUSIC_DONE: BLE not connected, skip notify");
+        return;
+    }
+
+    BLE_LOG_D("[SOC_EVT] CALM_MUSIC_DONE index=%d", payload[0]);
+    app_ctrl_send(CTRL_MSG_TYPE_EVENT, CTRL_CMD_CALM_MUSIC_DONE,
+                  g_ctrlSeq++, payload, 1);
 }
 
 static void app_ctrl_evt_owner_rec_from_soc(u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
@@ -2189,6 +2213,52 @@ static int app_ctrl_handle_calm_music_play_stop(u8 seq, u8 *payload, u16 len)
     return 0;
 }
 
+static void app_ctrl_rsp_calm_music_select_from_soc(
+    u8 cmdId, u8 seq, const u8 *payload, u16 payloadLen, void *userData)
+{
+    (void)cmdId;
+    (void)seq;
+    app_ctrl_ble_req_ctx_t *ctx = (app_ctrl_ble_req_ctx_t *)userData;
+    if (!ctx)
+    {
+        return;
+    }
+
+    u8 rsp[2] = {
+        (payloadLen >= 2 && payload && payload[0] == 0x00)
+            ? CTRL_STATUS_OK : CTRL_STATUS_SOC_ERROR,
+        (payloadLen >= 2 && payload) ? payload[1] : 0
+    };
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_SELECT,
+                  ctx->bleSeq, rsp, sizeof(rsp));
+}
+
+static int app_ctrl_handle_calm_music_select(u8 seq, u8 *payload, u16 len)
+{
+    if ((len != 0 && len != 1) || (len == 1 && (!payload || payload[0] > 1)))
+    {
+        u8 rsp[2] = {CTRL_STATUS_PARAM_ERROR, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_SELECT, seq, rsp, sizeof(rsp));
+        return -1;
+    }
+    if (!app_ctrl_check_soc_online(CTRL_CMD_CALM_MUSIC_SELECT, seq))
+    {
+        return -1;
+    }
+
+    g_ctx_calm_music_select.bleSeq = seq;
+    if (app_uart_send_cmd_with_cb(UART_SOC_CALM_MUSIC_SELECT,
+                                  payload, len,
+                                  app_ctrl_rsp_calm_music_select_from_soc,
+                                  &g_ctx_calm_music_select, 0) != 0)
+    {
+        u8 rsp[2] = {CTRL_STATUS_SOC_TIMEOUT, 0};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_SELECT, seq, rsp, sizeof(rsp));
+        return -2;
+    }
+    return 0;
+}
+
 // ----------------------- ultrasonic module (direct MCU GPIO, not via SOC) -----------------------
 static int app_ctrl_handle_ultra_cmd(u8 cmdId, u8 seq, u8 *payload, u16 len)
 {
@@ -2277,6 +2347,7 @@ void app_ctrl_init(void)
     app_uart_register_evt_handler(UART_SOC_ULTRA_EMIT_EVT,        app_ctrl_evt_ultra_emit_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_NEW_CALM_RECORD_EVT,   app_ctrl_evt_new_calm_record_from_soc, 0);
     app_uart_register_evt_handler(UART_SOC_SNACK_FEED_EVT,        app_ctrl_evt_snack_feed_from_soc, 0);
+    app_uart_register_evt_handler(UART_SOC_CALM_MUSIC_DONE_EVT,   app_ctrl_evt_calm_music_done_from_soc, 0);
 }
 
 void app_ctrl_time_task(void)
@@ -2455,6 +2526,10 @@ void app_ctrl_onRx(u8 *data, u16 len)
     case CTRL_CMD_CALM_MUSIC_PLAY_STOP:
         BLE_LOG_D("CTRL_CMD_CALM_MUSIC_PLAY_STOP");
         app_ctrl_handle_calm_music_play_stop(seq, payload, payLen);
+        break;
+    case CTRL_CMD_CALM_MUSIC_SELECT:
+        BLE_LOG_D("CTRL_CMD_CALM_MUSIC_SELECT");
+        app_ctrl_handle_calm_music_select(seq, payload, payLen);
         break;
     case CTRL_CMD_CALM_MODE_SET:
         BLE_LOG_D("CTRL_CMD_CALM_MODE_SET");

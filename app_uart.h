@@ -25,6 +25,7 @@ enum{
     UART_SOC_OWNER_REC_SAVE      = 0x26,
     UART_SOC_CALM_MUSIC_PLAY     = 0x27,
     UART_SOC_CALM_MUSIC_PLAY_STOP= 0x28,
+    UART_SOC_CALM_MUSIC_SELECT  = 0x29,
     UART_SOC_CALM_MODE_SET      = 0x30,
     UART_SOC_CALM_STRATEGY_SET  = 0x31,
     UART_SOC_CALM_STRATEGY_GET  = 0x33,
@@ -45,6 +46,7 @@ enum{
     UART_SOC_HEARTBEAT_EVT      = 0x87,
     UART_SOC_NEW_CALM_RECORD_EVT = 0x88,  /* SOC 通知 MCU 有新的安抚记录已保存 */
     UART_SOC_SNACK_FEED_EVT     = 0x89,  /* SOC requests MCU snack feeding */
+    UART_SOC_CALM_MUSIC_DONE_EVT = 0x8A, /* SOC 通知 MCU 安抚音频自然播放结束 */
 };
 
 /**
