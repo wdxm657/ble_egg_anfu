@@ -2135,7 +2135,7 @@ static void app_ctrl_rsp_calm_music_play_from_soc(u8 cmdId, u8 seq, const u8 *pa
     else
     {
         BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY failed soc_status=0x%02x", payloadLen ? payload[0] : 0xFF);
-        u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, 0};
+        u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, payloadLen ? payload[0] : 0};
         app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY, ctx->bleSeq, rsp, sizeof(rsp));
     }
 }
@@ -2179,9 +2179,20 @@ static void app_ctrl_rsp_calm_music_play_stop_from_soc(u8 cmdId, u8 seq, const u
         return;
     }
 
-    BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY_STOP OK");
-    u8 rsp[1] = {CTRL_STATUS_OK};
-    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP, ctx->bleSeq, rsp, sizeof(rsp));
+    if (payloadLen >= 1 && payload && payload[0] == 0x00)
+    {
+        BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY_STOP OK");
+        u8 rsp[1] = {CTRL_STATUS_OK};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP,
+                      ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    u8 err = (payloadLen >= 1 && payload) ? payload[0] : 0;
+    BLE_LOG_D("[SOC_RSP] CALM_MUSIC_PLAY_STOP failed soc_status=0x%02x", err);
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
+    app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_PLAY_STOP,
+                  ctx->bleSeq, rsp, sizeof(rsp));
 }
 
 static int app_ctrl_handle_calm_music_play_stop(u8 seq, u8 *payload, u16 len)
@@ -2224,11 +2235,17 @@ static void app_ctrl_rsp_calm_music_select_from_soc(
         return;
     }
 
-    u8 rsp[2] = {
-        (payloadLen >= 2 && payload && payload[0] == 0x00)
-            ? CTRL_STATUS_OK : CTRL_STATUS_SOC_ERROR,
-        (payloadLen >= 2 && payload) ? payload[1] : 0
-    };
+    if (payloadLen >= 2 && payload && payload[0] == 0x00)
+    {
+        u8 rsp[2] = {CTRL_STATUS_OK, payload[1]};
+        app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_SELECT,
+                      ctx->bleSeq, rsp, sizeof(rsp));
+        return;
+    }
+
+    u8 err = (payloadLen >= 1 && payload) ? payload[0] : 0;
+    BLE_LOG_D("[SOC_RSP] CALM_MUSIC_SELECT failed soc_status=0x%02x", err);
+    u8 rsp[2] = {CTRL_STATUS_SOC_ERROR, err};
     app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_CALM_MUSIC_SELECT,
                   ctx->bleSeq, rsp, sizeof(rsp));
 }

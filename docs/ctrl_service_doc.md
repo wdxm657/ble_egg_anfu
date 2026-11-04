@@ -96,6 +96,9 @@
 > - `OWNER_REC_PLAY_STOP(0x25)` — 主人录音停止播放
 > - `OWNER_REC_DELETE(0x23)` — 主人录音删除
 > - `OWNER_REC_SAVE(0x26)` — 主人录音保存
+> - `CALM_MUSIC_PLAY(0x27)` — 安抚音频播放
+> - `CALM_MUSIC_PLAY_STOP(0x28)` — 安抚音频停止播放
+> - `CALM_MUSIC_SELECT(0x29)` 设置模式 — 设置安抚音频
 > - `CALM_MODE_SET(0x30)` — 安抚模式设置
 > - `CALM_STRATEGY_SET(0x37)` — 安抚策略设置
 >
@@ -1057,9 +1060,9 @@ Flash UID 共 16 字节，分 **2 帧 RSP** 回传，每帧 8 字节负载。
 | byte4 | `0x02`       | 负载长度 = 2 |
 | byte5 | `0x00`       | 长度高字节 |
 | byte6 | `status`     | `0x00`成功；`0x03`参数错误；`0x07`SOC 错误 |
-| byte7 | `audioIndex` | SOC 当前选择：`0x00`=calm1.wav，`0x01`=calm2.wav |
+| byte7 | `audioIndex` / `errDetail` | `status=0x00` 时为当前音频索引；`status=0x07` 时为 SOC 原始状态码 |
 
-查询模式返回持久化后加载的当前选择；设置模式在本地保存成功后更新当前选择并返回。错误时 `byte7` 仍返回 SOC 当前索引；`status=0x06` 表示 MCU 等待 SOC 超时。设置操作在安抚会话进行中会被 SOC 拒绝，查询不受此限制。
+查询模式返回持久化后加载的当前选择；设置模式在本地保存成功后更新当前选择并返回。成功响应为 `[status=0x00, audioIndex]`；SOC 拒绝或执行失败时返回 `[status=0x07, errDetail]`，`errDetail` 为 SOC 原始状态码（安抚会话状态冲突为 `0x03`）。参数错误为 `[status=0x03, 0x00]`；`status=0x06` 表示 MCU 等待 SOC 超时。设置操作在安抚会话进行中会被 SOC 拒绝，查询不受此限制。
 
 **播放/停止测试**：
 
@@ -1068,7 +1071,7 @@ Flash UID 共 16 字节，分 **2 帧 RSP** 回传，每帧 8 字节负载。
 3. 发送 `CALM_MUSIC_PLAY(0x27)`，空负载，开始播放当前选择的文件。
 4. 发送 `CALM_MUSIC_PLAY_STOP(0x28)`，空负载，停止播放。
 
-`0x27` 与 `0x28` 的请求均为总长 6 字节（空负载）；成功响应均为总长 7 字节，`byte6=0x00`。播放失败时 `0x27` 返回 `status=0x07`、`errDetail=0x00`。
+`0x27` 与 `0x28` 的请求均为总长 6 字节（空负载）；成功响应均为总长 7 字节，`byte6=0x00`。SOC 拒绝或执行失败时返回总长 8 字节，`byte6=0x07`、`byte7=errDetail`；安抚会话状态冲突的 `errDetail=0x03`。其他 SOC 错误时 `errDetail` 为 SOC 原始状态码。
 
 ---
 
