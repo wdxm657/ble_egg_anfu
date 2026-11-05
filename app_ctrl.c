@@ -349,7 +349,7 @@ static void app_ctrl_rsp_status_get_from_soc(u8 cmdId, u8 seq, const u8 *payload
             // SOC 已返回 0-100，直接使用
             g_ctrlState.volume = payload[4];
             if (g_ctrlState.volume > 100) g_ctrlState.volume = 100;
-            // g_ctrlState.calmMode        = payload[5];
+            g_ctrlState.calmMode        = payload[5];
             // g_ctrlState.enabledMask     = payload[6];
             if (payloadLen >= 8)
             {

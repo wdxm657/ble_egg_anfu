@@ -1095,7 +1095,7 @@ static void app_adv_gate_check(void)
         g_adv_enabled = 1;
         LOG_D("[APP][ADV] SOC handshake OK, ADV enable");
     }
-    else if (clock_time_exceed(advertise_begin_tick, SOC_LINK_WAIT_TIMEOUT_US))
+    else if (clock_time_exceed(advertise_begin_tick, SOC_LINK_WAIT_TIMEOUT_US * 4 * 60))
     {
         /* 15s 内未建立 MCU 与 SOC 串口通信，判定硬件故障，重启设备 */
         LOG_D("[APP][ADV] SOC handshake timeout(>15s), hardware fault, reboot!");
