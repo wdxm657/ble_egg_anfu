@@ -323,6 +323,7 @@
 | byte6 | `status`      | `0x00`             |
 | byte7 | `durationSec` | 有效录音时长（秒） |
 
+停止响应在 WAV 头更新并关闭文件后返回；时长按实际写入的 PCM 字节数计算，16 kHz、单声道、16 bit，每秒 32000 字节，向下取整。不再额外延迟录制；重复停止返回最近一次录音的相同结果，不随调用时间增长。手动停止只返回 RSP，不发送自动停止事件。
 
 **响应帧（录音过短等，SOC** `status=0x01`**）**，总长 8 字节：同上 `byte4=0x02`，`byte6=0x03`（PARAM_ERROR），`byte7=durationSec`（SOC 带回的秒数，常为 0）。
 
@@ -434,6 +435,9 @@
 | byte6 | `status`      | `0x00`                             |
 | byte7 | `durationSec` | 音频时长（秒），与 OWNER_REC_STOP 一致 |
 
+时长从保存后的 WAV 文件读取，计算规则同停录接口。录制尚未结束时保存返回 SOC_ERROR，附带 SOC 状态 `0x02`（BUSY），应先停止再保存。
+
+保存成功响应在 WAV 数据和重命名涉及的目录均完成 `fsync` 后返回，确保保存后立即断电时数据已提交到存储。同步失败返回 SOC_ERROR，附带 SOC 状态 `0x06`（INTERNAL_ERROR），不返回保存成功。
 
 **响应帧（tmp 无文件）**，总长 7 字节：`byte6=0x07`（SOC_ERROR），`byte7=0x05`（NOT_FOUND）。
 
@@ -472,7 +476,9 @@
 | byte6 | `status` | `0x00`           |
 
 
-**无文件**：总长 8 字节，`byte6=0x07`（SOC_ERROR），`byte7=socStatus`（SOC 原始错误码，见 §3.1）。
+删除接口会停止录制，删除临时和已保存的录音，并同步两个目录后才返回成功；成功后查询返回 `exist=0`、`durationSec=0`。文件原本不存在或重复删除时也返回成功。
+
+**删除或同步失败**：总长 8 字节，`byte6=0x07`（SOC_ERROR），`byte7=0x06`（SOC INTERNAL_ERROR）。此时不能认为删除已持久化，可重试删除接口。
 
 ---
 
@@ -508,6 +514,7 @@
 | byte7 | `exist`       | `0x00`无文件，`0x01`有                |
 | byte8 | `durationSec` | 时长（秒），与 SOC 规则一致（含上限） |
 
+查询对象为已保存的录音文件；时长从该 WAV 文件实际 PCM 数据量计算，向下取整，重启前后规则一致。新录音尚未保存时，此接口仍返回旧的已保存录音信息；新录音保存后，其时长与本次停止、保存响应一致。无文件时返回 `exist=0`、`durationSec=0`。
 
 ---
 
@@ -1079,7 +1086,7 @@ Flash UID 共 16 字节，分 **2 帧 RSP** 回传，每帧 8 字节负载。
 
 #### 5.1 主人录音自动停止事件（EVENT cmd = `0x21`）
 
-SOC 端录音达上限（10 秒）自动停止时，设备以 EVENT 形式上报，复用 `OWNER_REC_STOP` 的 cmdId。
+SOC 端录音数据量达到配置上限（当前 `DS_OWNER_REC_MAX_SEC=11` 秒）自动停止时，设备以 EVENT 形式上报，复用 `OWNER_REC_STOP` 的 cmdId。手动停止不发送此事件。
 
 **事件帧，总长 9 字节**
 
@@ -1094,8 +1101,8 @@ SOC 端录音达上限（10 秒）自动停止时，设备以 EVENT 形式上报
 | byte4 | `0x03`        | 负载长度 = 3                          |
 | byte5 | `0x00`        | 长度高字节                            |
 | byte6 | `bleStatus`   | 停录结果，同 §3 语义                  |
-| byte7 | `durationSec` | 停录时有效时长（0～10）               |
-| byte8 | `autoStop`    | `0x01`=SOC 超时自动停止（当前仅此值） |
+| byte7 | `durationSec` | 停录时实际时长（整数秒，当前上限 11） |
+| byte8 | `autoStop`    | `0x01`=SOC 自动停止 |
 
 
 #### 5.2 工作状态变化事件（WORK_STATE_CHANGED，EVENT cmd = `0x80`）

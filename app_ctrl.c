@@ -1175,8 +1175,6 @@ static void app_ctrl_rsp_owner_rec_delete_from_soc(u8 cmdId, u8 seq, const u8 *p
         else
         {
             BLE_LOG_D("[SOC_RSP] CTRL_STATUS_SOC_ERROR res %d", payload[0]);
-            g_ctrlState.ownerVoiceExist    = 0;
-            g_ctrlState.ownerVoiceDuration = 0;
             u8 rsp[2]                      = {CTRL_STATUS_SOC_ERROR, payload[0]};
             app_ctrl_send(CTRL_MSG_TYPE_RSP, CTRL_CMD_OWNER_REC_DELETE, ctx->bleSeq, rsp, sizeof(rsp));
             return;
